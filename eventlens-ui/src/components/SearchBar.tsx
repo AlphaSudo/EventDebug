@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { searchAggregates, getAggregateTypes } from '../api/client';
+import { searchAggregates } from '../api/client';
 
 interface Props {
     onSelect: (id: string) => void;

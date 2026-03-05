@@ -31,36 +31,44 @@ class GenericJsonReducerTest {
 
     @Test
     void depositAddsToExistingBalance() {
-        var state = Map.of("balance", 100.0, "_version", 1L, "_lastEventType", "AccountCreated",
-                "_lastUpdated", "2026-01-01T00:00:00Z");
-        var result = reducer.apply(state, event("MoneyDeposited", "{\"balance\":50}"));
+        Map<String, Object> state = new java.util.LinkedHashMap<>();
+        state.put("balance", 100.0);
+        state.put("_version", 1L);
+        state.put("_lastEventType", "AccountCreated");
+        state.put("_lastUpdated", "2026-01-01T00:00:00Z");
 
+        var result = reducer.apply(state, event("MoneyDeposited", "{\"balance\":50}"));
         assertThat(result.get("balance")).isEqualTo(150.0);
     }
 
     @Test
     void withdrawalSubtractsFromExistingBalance() {
-        var state = Map.of("balance", 200.0, "_version", 2L, "_lastEventType", "MoneyDeposited",
-                "_lastUpdated", "2026-01-01T00:00:00Z");
-        var result = reducer.apply(state, event("MoneyWithdrawn", "{\"balance\":75}"));
+        Map<String, Object> state = new java.util.LinkedHashMap<>();
+        state.put("balance", 200.0);
+        state.put("_version", 2L);
+        state.put("_lastEventType", "MoneyDeposited");
+        state.put("_lastUpdated", "2026-01-01T00:00:00Z");
 
+        var result = reducer.apply(state, event("MoneyWithdrawn", "{\"balance\":75}"));
         assertThat(result.get("balance")).isEqualTo(125.0);
     }
 
     @Test
     void closedEventSetsStatusDeleted() {
         var result = reducer.apply(Map.of(), event("AccountClosed", "{\"reason\":\"customer request\"}"));
-
         assertThat(result).containsEntry("status", "DELETED")
                 .containsEntry("reason", "customer request");
     }
 
     @Test
     void genericPayloadFieldsOverwriteState() {
-        var state = Map.of("email", "old@test.com", "_version", 1L,
-                "_lastEventType", "AccountCreated", "_lastUpdated", "now");
-        var result = reducer.apply(state, event("EmailUpdated", "{\"email\":\"new@test.com\"}"));
+        Map<String, Object> state = new java.util.LinkedHashMap<>();
+        state.put("email", "old@test.com");
+        state.put("_version", 1L);
+        state.put("_lastEventType", "AccountCreated");
+        state.put("_lastUpdated", "now");
 
+        var result = reducer.apply(state, event("EmailUpdated", "{\"email\":\"new@test.com\"}"));
         assertThat(result).containsEntry("email", "new@test.com");
     }
 

@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/api/client.ts","./src/components/anomalypanel.tsx","./src/components/livestream.tsx","./src/components/searchbar.tsx","./src/components/stateviewer.tsx","./src/components/timeline.tsx"],"version":"5.9.3"}

@@ -1,7 +1,5 @@
 package io.eventlens.pg;
 
-import io.eventlens.core.aggregator.ReducerRegistry;
-import io.eventlens.core.engine.ReplayEngine;
 import io.eventlens.core.model.StoredEvent;
 import org.junit.jupiter.api.*;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -17,6 +15,7 @@ import static org.assertj.core.api.Assertions.*;
 class PgEventStoreReaderIntegrationTest {
 
     @Container
+    @SuppressWarnings("resource")
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("eventlens_test");
 

@@ -1,6 +1,5 @@
 package io.eventlens.cli;
 
-import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import io.eventlens.pg.PgConfig;
 

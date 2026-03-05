@@ -3,8 +3,6 @@ package io.eventlens.api.routes;
 import io.eventlens.core.engine.ExportEngine;
 import io.javalin.http.Context;
 
-import java.util.Map;
-
 /** Export endpoints — downloads aggregate event history in various formats. */
 public class ExportRoutes {
 

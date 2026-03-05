@@ -1,7 +1,7 @@
 package io.eventlens.core.engine;
 
 import io.eventlens.core.model.*;
-import io.eventlens.core.spi.EventStoreReader;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

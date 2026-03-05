@@ -1,7 +1,6 @@
 package io.eventlens.api;
 
 import io.eventlens.api.routes.*;
-import io.eventlens.api.websocket.LiveTailWebSocket;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.engine.*;
 import io.eventlens.core.spi.EventStoreReader;
@@ -27,7 +26,6 @@ public class EventLensServer {
 
     private final Javalin app;
     private final int port;
-    private final EventLensConfig config;
 
     public EventLensServer(
             EventLensConfig config,
@@ -38,7 +36,6 @@ public class EventLensServer {
             ExportEngine exportEngine,
             DiffEngine diffEngine) {
         this.port = config.getServer().getPort();
-        this.config = config;
 
         this.app = Javalin.create(cfg -> {
             cfg.staticFiles.add("/web"); // Embedded React build
@@ -70,7 +67,7 @@ public class EventLensServer {
         }
 
         // ── Routes ─────────────────────────────────────────────────────────
-        var aggregateRoutes = new AggregateRoutes(reader, replayEngine);
+        var aggregateRoutes = new AggregateRoutes(reader);
         var timelineRoutes = new TimelineRoutes(replayEngine);
         var bisectRoutes = new BisectRoutes(bisectEngine);
         var anomalyRoutes = new AnomalyRoutes(anomalyDetector);

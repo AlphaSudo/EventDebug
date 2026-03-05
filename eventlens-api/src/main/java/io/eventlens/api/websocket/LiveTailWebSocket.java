@@ -50,7 +50,7 @@ public class LiveTailWebSocket {
         app.ws("/ws/live", ws -> {
             ws.onConnect(ctx -> {
                 sessions.add(ctx);
-                log.debug("WebSocket client connected: {}", ctx.getSessionId());
+                log.debug("WebSocket client connected: {}", ctx.sessionId());
 
                 // Backfill last 20 events
                 var recent = reader.getRecentEvents(20);
@@ -61,11 +61,11 @@ public class LiveTailWebSocket {
 
             ws.onClose(ctx -> {
                 sessions.remove(ctx);
-                log.debug("WebSocket client disconnected: {}", ctx.getSessionId());
+                log.debug("WebSocket client disconnected: {}", ctx.sessionId());
             });
 
             ws.onError(ctx -> {
-                sessions.remove(ctx.getSessionId());
+                sessions.remove(ctx);
             });
         });
     }
@@ -79,7 +79,7 @@ public class LiveTailWebSocket {
                 sendTo(session, event);
                 return false;
             } catch (Exception e) {
-                log.debug("Removed dead WebSocket session: {}", session.getSessionId());
+                log.debug("Removed dead WebSocket session: {}", session.sessionId());
                 return true;
             }
         });

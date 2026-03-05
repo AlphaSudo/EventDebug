@@ -6,7 +6,22 @@ plugins {
     base
 }
 
+val npmInstall by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Install NPM dependencies"
+    workingDir = projectDir
+
+    inputs.file("package.json")
+    outputs.dir("node_modules")
+
+    commandLine(
+        if (System.getProperty("os.name").lowercase().contains("win")) "npm.cmd" else "npm",
+        "install"
+    )
+}
+
 val npmBuild by tasks.registering(Exec::class) {
+    dependsOn(npmInstall)
     group = "build"
     description = "Build the React UI with Vite"
     workingDir = projectDir

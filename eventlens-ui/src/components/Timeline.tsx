@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { getTransitions, StateTransition } from '../api/client';
+import { getTransitions } from '../api/client';
 
 interface Props {
     aggregateId: string;

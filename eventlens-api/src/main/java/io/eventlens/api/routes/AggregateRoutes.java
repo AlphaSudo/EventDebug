@@ -1,21 +1,17 @@
 package io.eventlens.api.routes;
 
-import io.eventlens.core.engine.ReplayEngine;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.http.Context;
 
-import java.util.List;
 import java.util.Map;
 
 /** Aggregate search, type listing, and recent event endpoints. */
 public class AggregateRoutes {
 
     private final EventStoreReader reader;
-    private final ReplayEngine replayEngine;
 
-    public AggregateRoutes(EventStoreReader reader, ReplayEngine replayEngine) {
+    public AggregateRoutes(EventStoreReader reader) {
         this.reader = reader;
-        this.replayEngine = replayEngine;
     }
 
     /** GET /api/aggregates/search?q=ACC&limit=20 */

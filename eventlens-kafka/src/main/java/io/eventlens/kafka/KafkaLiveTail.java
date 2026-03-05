@@ -30,7 +30,6 @@ public class KafkaLiveTail implements AutoCloseable {
     private final String topic;
     private final List<Consumer<StoredEvent>> listeners = new CopyOnWriteArrayList<>();
     private volatile boolean running = false;
-    private Thread pollingThread;
 
     public KafkaLiveTail(KafkaConfig config) {
         Properties props = new Properties();
@@ -55,7 +54,7 @@ public class KafkaLiveTail implements AutoCloseable {
     public void start() {
         running = true;
         consumer.subscribe(List.of(topic));
-        pollingThread = Thread.ofVirtual().name("eventlens-kafka-tail").start(this::pollLoop);
+        Thread.ofVirtual().name("eventlens-kafka-tail").start(this::pollLoop);
         log.info("Kafka live tail started on topic '{}'", topic);
     }
 
