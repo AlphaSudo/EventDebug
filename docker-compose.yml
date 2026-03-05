@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 # Development infrastructure only — no app container yet
 # (app container is added in Phase 17 after shadow JAR is built)
