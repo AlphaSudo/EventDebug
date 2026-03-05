@@ -1,0 +1,44 @@
+# EventLens Configuration
+# Copy this file to the working directory, ~/.eventlens/config.yaml, or /etc/eventlens/config.yaml
+
+server:
+  port: 9090
+
+  # Set allowed-origins to restrict CORS in production
+  # Use "*" only in development
+  allowed-origins:
+    - "http://localhost:5173"   # Vite dev server
+    - "http://localhost:9090"   # Embedded server
+
+  auth:
+    enabled: false
+    username: admin
+    password: changeme
+
+datasource:
+  url: jdbc:postgresql://localhost:5432/eventlens_dev
+  username: postgres
+  password: secret
+  table:                       # Optional: auto-detected if omitted
+
+kafka:                         # Optional section — remove to disable Kafka
+  bootstrap-servers: localhost:9092
+  topic: domain-events
+
+replay:
+  default-reducer: generic     # "generic" | classpath
+  reducers:
+    # BankAccount: com.myapp.reducers.BankAccountReducer
+
+anomaly:
+  scan-interval-seconds: 60
+  rules:
+    - code: NEGATIVE_BALANCE
+      condition: "balance < 0"
+      severity: HIGH
+    - code: LARGE_WITHDRAWAL
+      condition: "amount > 10000"
+      severity: MEDIUM
+
+ui:
+  theme: dark                  # dark | light
