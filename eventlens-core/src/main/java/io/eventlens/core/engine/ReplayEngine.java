@@ -1,5 +1,7 @@
 package io.eventlens.core.engine;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.eventlens.core.aggregator.ReducerRegistry;
 import io.eventlens.core.exception.ReplayException;
 import io.eventlens.core.model.*;
@@ -8,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.time.Duration;
 
 /**
  * The heart of EventLens — replays events through a reducer to produce
@@ -19,10 +22,15 @@ public class ReplayEngine {
 
     private final EventStoreReader reader;
     private final ReducerRegistry reducerRegistry;
+    private final Cache<String, ReplayResult> fullReplayCache;
 
     public ReplayEngine(EventStoreReader reader, ReducerRegistry reducerRegistry) {
         this.reader = reader;
         this.reducerRegistry = reducerRegistry;
+        this.fullReplayCache = Caffeine.newBuilder()
+                .maximumSize(1_000)
+                .expireAfterWrite(Duration.ofMinutes(1))
+                .build();
     }
 
     /**
@@ -31,8 +39,8 @@ public class ReplayEngine {
      */
     public List<StateTransition> replayFull(String aggregateId) {
         log.debug("Full replay for aggregate: {}", aggregateId);
-        List<StoredEvent> events = reader.getEvents(aggregateId);
-        return computeTransitions(aggregateId, events);
+        ReplayResult result = fullReplayCache.get(aggregateId, this::replayFullInternal);
+        return result.transitions();
     }
 
     /**
@@ -56,9 +64,20 @@ public class ReplayEngine {
      * Lightweight — used by the UI timeline component.
      */
     public AggregateTimeline buildTimeline(String aggregateId) {
-        List<StoredEvent> events = reader.getEvents(aggregateId);
+        // Backwards-compatible: default to full history
+        return buildTimeline(aggregateId, Integer.MAX_VALUE, 0);
+    }
+
+    /**
+     * Build a paginated timeline containing a window of events for the aggregate.
+     * The {@code totalEvents} field always reflects the full count for the
+     * aggregate, even when a subset of events is returned.
+     */
+    public AggregateTimeline buildTimeline(String aggregateId, int limit, int offset) {
+        List<StoredEvent> events = reader.getEvents(aggregateId, limit, offset);
+        long total = reader.countEvents(aggregateId);
         String aggregateType = events.isEmpty() ? "unknown" : events.getFirst().aggregateType();
-        return new AggregateTimeline(aggregateId, aggregateType, events, events.size());
+        return new AggregateTimeline(aggregateId, aggregateType, events, (int) Math.min(Integer.MAX_VALUE, total));
     }
 
     // ── Internal ────────────────────────────────────────────────────────────
@@ -120,6 +139,18 @@ public class ReplayEngine {
             }
         }
         return diff;
+    }
+
+    private ReplayResult replayFullInternal(String aggregateId) {
+        List<StoredEvent> events = reader.getEvents(aggregateId);
+        List<StateTransition> transitions = computeTransitions(aggregateId, events);
+        long lastSequence = transitions.isEmpty()
+                ? 0
+                : transitions.getLast().event().sequenceNumber();
+        Map<String, Object> finalState = transitions.isEmpty()
+                ? Map.of()
+                : transitions.getLast().stateAfter();
+        return new ReplayResult(aggregateId, lastSequence, finalState, transitions);
     }
 
     public record ReplayResult(

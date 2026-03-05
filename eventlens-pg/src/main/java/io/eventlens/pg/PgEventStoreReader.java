@@ -49,12 +49,19 @@ public class PgEventStoreReader implements EventStoreReader {
 
     @Override
     public List<StoredEvent> getEvents(String aggregateId) {
+        return getEvents(aggregateId, Integer.MAX_VALUE, 0);
+    }
+
+    @Override
+    public List<StoredEvent> getEvents(String aggregateId, int limit, int offset) {
         String sql = String.format(
-                "SELECT * FROM %s WHERE %s = ? ORDER BY %s ASC",
+                "SELECT * FROM %s WHERE %s = ? ORDER BY %s ASC LIMIT ? OFFSET ?",
                 schema.tableName(), schema.aggregateIdColumn(), schema.sequenceColumn());
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, aggregateId);
+            ps.setInt(2, limit);
+            ps.setInt(3, offset);
             return mapResults(ps.executeQuery());
         } catch (SQLException e) {
             throw new EventStoreException("Failed to read events for aggregate: " + aggregateId, e);

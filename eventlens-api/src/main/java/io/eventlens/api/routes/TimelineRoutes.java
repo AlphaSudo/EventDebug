@@ -14,7 +14,9 @@ public class TimelineRoutes {
 
     /** GET /api/aggregates/{id}/timeline */
     public void getTimeline(Context ctx) {
-        ctx.json(replayEngine.buildTimeline(ctx.pathParam("id")));
+        int limit = ctx.queryParamAsClass("limit", Integer.class).getOrDefault(500);
+        int offset = ctx.queryParamAsClass("offset", Integer.class).getOrDefault(0);
+        ctx.json(replayEngine.buildTimeline(ctx.pathParam("id"), limit, offset));
     }
 
     /** GET /api/aggregates/{id}/replay */

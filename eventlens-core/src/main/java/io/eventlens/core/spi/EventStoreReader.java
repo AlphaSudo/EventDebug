@@ -17,6 +17,19 @@ public interface EventStoreReader {
     /** Get all events for an aggregate, ordered by sequence number. */
     List<StoredEvent> getEvents(String aggregateId);
 
+    /**
+     * Get events for an aggregate with pagination.
+     *
+     * @param aggregateId the aggregate identifier
+     * @param limit       maximum number of events to return
+     * @param offset      number of events to skip from the start
+     */
+    default List<StoredEvent> getEvents(String aggregateId, int limit, int offset) {
+        // Default implementation falls back to full history for non-paged readers.
+        // Implementations like PgEventStoreReader override this to use SQL LIMIT/OFFSET.
+        return getEvents(aggregateId);
+    }
+
     /** Get events for an aggregate up to a sequence number (inclusive). */
     List<StoredEvent> getEventsUpTo(String aggregateId, long maxSequence);
 
