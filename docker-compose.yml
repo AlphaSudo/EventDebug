@@ -1,7 +1,5 @@
 version: "3.8"
 
-# Development infrastructure only — no app container yet
-# (app container is added in Phase 17 after shadow JAR is built)
 services:
 
   postgres:
@@ -45,6 +43,19 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
+
+  app:
+    build: .
+    container_name: eventlens-app
+    depends_on:
+      - postgres
+      - kafka
+    environment:
+      EVENTLENS_CONFIG: /app/eventlens.yaml
+    volumes:
+      - ./eventlens.yaml:/app/eventlens.yaml:ro
+    ports:
+      - "9090:9090"
 
 volumes:
   pg_data:
