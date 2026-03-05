@@ -1,5 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
-import { getTransitions } from '../api/client';
+import { useTimeline } from '../hooks/useTimeline';
 
 interface Props {
     aggregateId: string;
@@ -16,10 +15,7 @@ function dotClass(eventType: string): string {
 }
 
 export default function Timeline({ aggregateId, selectedSequence, onSelectEvent }: Props) {
-    const { data: transitions, isLoading } = useQuery({
-        queryKey: ['transitions', aggregateId],
-        queryFn: () => getTransitions(aggregateId),
-    });
+    const { data: transitions, isLoading } = useTimeline(aggregateId);
 
     if (isLoading) {
         return (

@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { getTransitions } from '../api/client';
+import { useReplay } from '../hooks/useReplay';
+import StateDiff from './StateDiff';
 
 interface Props {
     aggregateId: string;
@@ -7,10 +7,7 @@ interface Props {
 }
 
 export default function StateViewer({ aggregateId, sequence }: Props) {
-    const { data: transitions } = useQuery({
-        queryKey: ['transitions', aggregateId],
-        queryFn: () => getTransitions(aggregateId),
-    });
+    const { data: transitions } = useReplay(aggregateId);
 
     const transition = transitions?.find(t => t.event.sequenceNumber === sequence);
     if (!transition) return null;
@@ -43,19 +40,7 @@ export default function StateViewer({ aggregateId, sequence }: Props) {
             </div>
 
             {/* Field-level diff */}
-            {hasDiff && (
-                <div className="diff-list">
-                    <div className="card-title" style={{ marginTop: 12, marginBottom: 8 }}>Changes</div>
-                    {Object.entries(diff).map(([field, change]) => (
-                        <div key={field} className="diff-row">
-                            <span className="diff-field">{field}:</span>
-                            <span className="diff-old">{JSON.stringify(change.oldValue) ?? 'undefined'}</span>
-                            <span className="diff-arrow">→</span>
-                            <span className="diff-new">{JSON.stringify(change.newValue) ?? 'undefined'}</span>
-                        </div>
-                    ))}
-                </div>
-            )}
+            {hasDiff && <StateDiff diff={diff} />}
 
             {/* Metadata */}
             <div className="event-meta">

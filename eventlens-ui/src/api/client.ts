@@ -60,8 +60,10 @@ export const searchAggregates = (q: string, limit = 20) =>
 export const getAggregateTypes = () =>
     api.get<string[]>('/meta/types').then(r => r.data);
 
-export const getTimeline = (id: string) =>
-    api.get<{ events: StoredEvent[]; totalEvents: number }>(`/aggregates/${id}/timeline`).then(r => r.data);
+export const getTimeline = (id: string, limit = 500, offset = 0) =>
+    api.get<{ events: StoredEvent[]; totalEvents: number }>(
+        `/aggregates/${id}/timeline?limit=${limit}&offset=${offset}`
+    ).then(r => r.data);
 
 export const getTransitions = (id: string) =>
     api.get<StateTransition[]>(`/aggregates/${id}/transitions`).then(r => r.data);

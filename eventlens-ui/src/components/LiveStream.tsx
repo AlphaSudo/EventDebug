@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { StoredEvent } from '../api/client';
+import { useWebSocket } from '../hooks/useWebSocket';
+import { useToast } from './ToastProvider';
 
 function typeClass(t: string): string {
     const l = t.toLowerCase();
@@ -13,34 +15,21 @@ export default function LiveStream() {
     const [events, setEvents] = useState<StoredEvent[]>([]);
     const [paused, setPaused] = useState(false);
     const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
-    const wsRef = useRef<WebSocket | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const pausedRef = useRef(paused);
     pausedRef.current = paused;
+    const { notify } = useToast();
+
+    useWebSocket<StoredEvent>('/ws/live', event => {
+        if (pausedRef.current) return;
+        setEvents(prev => [...prev.slice(-99), event]);
+    });
 
     useEffect(() => {
-        const connect = () => {
-            const ws = new WebSocket(`ws://${window.location.host}/ws/live`);
-            wsRef.current = ws;
-
-            ws.onopen = () => setWsStatus('connected');
-            ws.onclose = () => {
-                setWsStatus('disconnected');
-                setTimeout(connect, 3000); // auto-reconnect
-            };
-            ws.onerror = () => setWsStatus('disconnected');
-            ws.onmessage = msg => {
-                if (pausedRef.current) return;
-                try {
-                    const event: StoredEvent = JSON.parse(msg.data);
-                    setEvents(prev => [...prev.slice(-99), event]);
-                } catch { /* malformed */ }
-            };
-        };
-
-        connect();
-        return () => wsRef.current?.close();
-    }, []);
+        if (wsStatus === 'disconnected') {
+            notify('Live stream disconnected. Retrying…');
+        }
+    }, [wsStatus, notify]);
 
     // Auto-scroll to bottom
     useEffect(() => {

@@ -113,6 +113,21 @@ class PgEventStoreReaderIntegrationTest {
     }
 
     @Test
+    void getEventsWithPaginationReturnsWindowedSlice() throws Exception {
+        insert("ACC-004", "BankAccount", 1, "AccountCreated", "{\"balance\":0}");
+        insert("ACC-004", "BankAccount", 2, "MoneyDeposited", "{\"amount\":100}");
+        insert("ACC-004", "BankAccount", 3, "MoneyDeposited", "{\"amount\":50}");
+        insert("ACC-004", "BankAccount", 4, "MoneyWithdrawn", "{\"amount\":20}");
+
+        // limit=2, offset=1 -> should return sequence 2 and 3
+        List<StoredEvent> window = reader.getEvents("ACC-004", 2, 1);
+
+        assertThat(window).hasSize(2);
+        assertThat(window.get(0).sequenceNumber()).isEqualTo(2);
+        assertThat(window.get(1).sequenceNumber()).isEqualTo(3);
+    }
+
+    @Test
     void getAggregateTypesReturnsDistinctTypes() throws Exception {
         insert("ACC-001", "BankAccount", 1, "AccountCreated", "{\"balance\":0}");
         insert("ORD-001", "Order", 1, "OrderCreated", "{\"total\":50}");
