@@ -47,7 +47,7 @@ subprojects {
     }
 
     dependencies {
-        // Logging — every module gets SLF4J API
+        // Logging â€” every module gets SLF4J API
         "implementation"("org.slf4j:slf4j-api:$slf4jVersion")
 
         // Test

@@ -1,6 +1,6 @@
 ### Multi-stage Dockerfile for EventLens
 
-## 1) Build stage – compile and assemble the fat JAR
+## 1) Build stage â€“ compile and assemble the fat JAR
 FROM docker.io/library/eclipse-temurin:21-jdk AS build
 
 WORKDIR /workspace
@@ -19,12 +19,10 @@ COPY eventlens-ui ./eventlens-ui
 COPY eventlens-app ./eventlens-app
 COPY eventlens.yaml ./eventlens.yaml
 
-# Ensure Unix line endings on scripts and config, then build the shaded JAR
-RUN find . -type f \( -name "*.kts" -o -name "*.properties" -o -name "gradlew" \) -exec sed -i 's/\r$//' {} + \
-    && chmod +x gradlew \
-    && ./gradlew :eventlens-app:shadowJar --no-daemon
+# Ensure Unix line endings on ALL text files, then build the shaded JAR
+RUN find . -type f \( -name "*.kts" -o -name "*.properties" -o -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.yaml" -o -name "*.yml" -o -name "gradlew" \) -exec sed -i 's/\r$//' {} + && chmod +x gradlew && ./gradlew :eventlens-app:shadowJar --no-daemon
 
-## 2) Runtime stage – slim JRE image
+## 2) Runtime stage â€“ slim JRE image
 FROM docker.io/library/eclipse-temurin:21-jre
 
 WORKDIR /app
