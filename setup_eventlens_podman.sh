@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Absolute or relative path to your EventDebug repo inside WSL
-# Adjust this if your repo is elsewhere (e.g. /mnt/c/Java\ Developer/EventDebug)
-PROJECT_DIR="$HOME/EventDebug"
+# For your current setup the project lives on the C: drive under /mnt/c/...
+PROJECT_DIR="/mnt/c/Java Developer/EventDebug"
 
 echo "=== Updating apt and installing Podman ==="
 sudo apt update
