@@ -1,0 +1,27 @@
+﻿19:34:50.903 [main] INFO  io.eventlens.core.ConfigLoader ΓÇö Loaded config from: /app/eventlens.yaml
+19:34:52.364 [main] INFO  io.eventlens.pg.PgEventStoreReader ΓÇö Connected to PostgreSQL: jdbc:postgresql://postgres:5432/eventlens_dev
+19:34:53.506 [main] INFO  io.eventlens.pg.PgSchemaDetector ΓÇö Auto-detected event store table: 'event_store'
+19:34:53.575 [main] DEBUG io.eventlens.pg.PgSchemaDetector ΓÇö Columns for table 'event_store': [event_id, aggregate_id, aggregate_type, sequence_number, event_type, payload, metadata, timestamp, global_position]
+19:34:54.761 [main] INFO  io.eventlens.kafka.KafkaLiveTail ΓÇö KafkaLiveTail initialized for topic 'domain-events' on kafka:9092
+≡ƒôí Kafka consumer: domain-events
+19:34:55.286 [main] INFO  io.eventlens.kafka.KafkaLiveTail ΓÇö Kafka live tail started on topic 'domain-events'
+19:34:56.691 [main] INFO  io.javalin.Javalin ΓÇö Starting Javalin ...
+19:34:56.745 [main] INFO  org.eclipse.jetty.server.Server ΓÇö jetty-11.0.23; built: 2024-08-14T01:40:17.906Z; git: 6fcf5ccaebd7ca13a0cb96c96adca699a24080a0; jvm 21.0.10+7-LTS
+19:34:57.313 [main] INFO  o.e.j.s.s.DefaultSessionIdManager ΓÇö Session workerName=node0
+19:34:57.635 [main] INFO  o.e.j.server.handler.ContextHandler ΓÇö Started o.e.j.s.ServletContextHandler@782bf610{/,null,AVAILABLE}
+19:34:57.903 [main] INFO  o.e.jetty.server.AbstractConnector ΓÇö Started ServerConnector@681e144{HTTP/1.1, (http/1.1)}{0.0.0.0:9090}
+19:34:57.935 [main] INFO  org.eclipse.jetty.server.Server ΓÇö Started Server@6ff415ad{STARTING}[11.0.23,sto=0] @13161ms
+19:34:57.936 [main] INFO  io.javalin.Javalin ΓÇö 
+       __                  ___           _____
+      / /___ __   ______ _/ (_)___      / ___/
+ __  / / __ `/ | / / __ `/ / / __ \    / __ \
+/ /_/ / /_/ /| |/ / /_/ / / / / / /   / /_/ /
+\____/\__,_/ |___/\__,_/_/_/_/ /_/    \____/
+
+       https://javalin.io/documentation
+
+19:34:57.958 [main] INFO  io.javalin.Javalin ΓÇö Javalin started in 2620ms \o/
+19:34:58.155 [main] INFO  io.javalin.Javalin ΓÇö Static file handler added: StaticFileConfig(hostedPath=/, directory=/web, location=CLASSPATH, precompress=false, aliasCheck=null, headers={Cache-Control=max-age=0}, skipFileFunction=Function1<jakarta.servlet.http.HttpServletRequest, java.lang.Boolean>, mimeTypes={}). File system location: 'jar:file:/app/eventlens.jar!/web'
+19:34:58.263 [main] INFO  io.javalin.Javalin ΓÇö Listening on http://localhost:9090/
+19:34:58.503 [main] INFO  io.javalin.Javalin ΓÇö You are running Javalin 6.3.0 (released August 22, 2024. Your Javalin version is 560 days old. Consider checking for a newer version.).
+19:34:58.503 [main] INFO  io.eventlens.api.EventLensServer ΓÇö EventLens running at http://localhost:9090

@@ -110,5 +110,12 @@ public class ServeCommand implements Runnable {
         }
 
         server.start();
+
+        // Block the main thread to keep the JVM alive (Javalin runs on daemon threads)
+        try {
+            Thread.currentThread().join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
