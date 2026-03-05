@@ -3,6 +3,9 @@
 ## 1) Build stage â€“ compile and assemble the fat JAR
 FROM docker.io/library/eclipse-temurin:21-jdk AS build
 
+# Install Node.js 20 LTS (needed by eventlens-ui for npm/Vite build)
+RUN apt-get update && apt-get install -y curl && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /workspace
 
 # Gradle wrapper and settings (better layer cache)

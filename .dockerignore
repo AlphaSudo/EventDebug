@@ -1,0 +1,7 @@
+**/node_modules
+**/build
+**/.gradle
+.git
+*.md
+build_errors.txt
+ESD.txt
