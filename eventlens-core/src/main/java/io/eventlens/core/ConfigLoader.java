@@ -1,6 +1,7 @@
 package io.eventlens.core;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,7 @@ public class ConfigLoader {
     };
 
     private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory())
+            .setPropertyNamingStrategy(PropertyNamingStrategies.KEBAB_CASE)
             .findAndRegisterModules();
 
     public static EventLensConfig load() {

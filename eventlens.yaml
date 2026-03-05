@@ -16,13 +16,13 @@ server:
     password: changeme
 
 datasource:
-  url: jdbc:postgresql://localhost:5432/eventlens_dev
+  url: jdbc:postgresql://postgres:5432/eventlens_dev
   username: postgres
   password: secret
   table:                       # Optional: auto-detected if omitted
 
 kafka:                         # Optional section — remove to disable Kafka
-  bootstrap-servers: localhost:9092
+  bootstrap-servers: kafka:9092
   topic: domain-events
 
 replay:
