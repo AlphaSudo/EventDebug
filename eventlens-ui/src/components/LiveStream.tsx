@@ -14,13 +14,12 @@ function typeClass(t: string): string {
 export default function LiveStream() {
     const [events, setEvents] = useState<StoredEvent[]>([]);
     const [paused, setPaused] = useState(false);
-    const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
     const scrollRef = useRef<HTMLDivElement>(null);
     const pausedRef = useRef(paused);
     pausedRef.current = paused;
     const { notify } = useToast();
 
-    useWebSocket<StoredEvent>('/ws/live', event => {
+    const wsStatus = useWebSocket<StoredEvent>('/ws/live', event => {
         if (pausedRef.current) return;
         setEvents(prev => [...prev.slice(-99), event]);
     });
