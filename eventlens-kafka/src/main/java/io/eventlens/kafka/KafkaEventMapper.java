@@ -7,7 +7,6 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import java.time.Instant;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * Maps a Kafka {@link ConsumerRecord} to a {@link StoredEvent}.
@@ -35,7 +34,7 @@ public class KafkaEventMapper {
             // Full format: all fields present
             if (value.containsKey("eventId") && value.containsKey("aggregateId")) {
                 return new StoredEvent(
-                        UUID.fromString((String) value.get("eventId")),
+                        UUID.fromString((String) value.get("eventId")).toString(),
                         (String) value.get("aggregateId"),
                         (String) value.getOrDefault("aggregateType", "unknown"),
                         toLong(value.getOrDefault("sequenceNumber", 0L)),
@@ -52,7 +51,7 @@ public class KafkaEventMapper {
             String aggregateId = record.key() != null ? record.key() : "unknown";
 
             return new StoredEvent(
-                    UUID.randomUUID(),
+                    UUID.randomUUID().toString(),
                     aggregateId,
                     "unknown",
                     record.offset(),
