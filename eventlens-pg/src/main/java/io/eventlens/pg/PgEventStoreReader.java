@@ -2,6 +2,7 @@ package io.eventlens.pg;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import io.eventlens.core.EventLensConfig.ColumnMappingConfig;
 import io.eventlens.core.exception.EventStoreException;
 import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.spi.EventStoreReader;
@@ -10,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.*;
+import java.time.Instant;
 import java.util.*;
 
 /**
@@ -17,8 +19,9 @@ import java.util.*;
  *
  * <p>
  * Uses HikariCP in <b>read-only</b> mode — it will never write to your event
- * store.
- * Schema is auto-detected unless overridden in config.
+ * store. Schema is auto-detected from database metadata unless overridden in
+ * config. Column name mappings can be explicitly set via
+ * {@code datasource.columns} in eventlens.yaml.
  */
 public class PgEventStoreReader implements EventStoreReader {
 
@@ -39,11 +42,15 @@ public class PgEventStoreReader implements EventStoreReader {
         this.dataSource = new HikariDataSource(hc);
         log.info("Connected to PostgreSQL: {}", config.jdbcUrl());
 
+        var detector = new PgSchemaDetector();
+        var overrides = config.columnOverrides() != null ? config.columnOverrides() : new ColumnMappingConfig();
+
         if (config.tableName() != null && !config.tableName().isBlank()) {
-            this.schema = buildManualSchema(config.tableName());
-            log.info("Using manually configured table: '{}'", config.tableName());
+            // Fix 2: use detectForTable instead of the hardcoded buildManualSchema()
+            // so we still read real DB metadata even when the table is manually specified.
+            this.schema = detector.detectForTable(config.tableName(), dataSource, overrides);
         } else {
-            this.schema = new PgSchemaDetector().detect(dataSource);
+            this.schema = detector.detect(dataSource, overrides);
         }
     }
 
@@ -86,16 +93,31 @@ public class PgEventStoreReader implements EventStoreReader {
 
     @Override
     public List<String> findAggregateIds(String aggregateType, int limit, int offset) {
-        String sql = String.format(
-                "SELECT DISTINCT %s FROM %s WHERE %s = ? ORDER BY %s LIMIT ? OFFSET ?",
-                schema.aggregateIdColumn(), schema.tableName(),
-                schema.aggregateTypeColumn() != null ? schema.aggregateTypeColumn() : "1=1",
-                schema.aggregateIdColumn());
+        // Fix 7: correct SQL when aggregateTypeColumn is null — avoid "WHERE 1=1 = ?"
+        final String sql;
+        if (schema.aggregateTypeColumn() != null) {
+            sql = String.format(
+                    "SELECT DISTINCT %s FROM %s WHERE %s = ? ORDER BY %s LIMIT ? OFFSET ?",
+                    schema.aggregateIdColumn(), schema.tableName(),
+                    schema.aggregateTypeColumn(), schema.aggregateIdColumn());
+        } else {
+            // No aggregate type column — return all aggregate IDs, ignoring the type filter
+            log.debug("No aggregate type column detected; returning all aggregate IDs (type filter ignored)");
+            sql = String.format(
+                    "SELECT DISTINCT %s FROM %s ORDER BY %s LIMIT ? OFFSET ?",
+                    schema.aggregateIdColumn(), schema.tableName(), schema.aggregateIdColumn());
+        }
+
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, aggregateType);
-            ps.setInt(2, limit);
-            ps.setInt(3, offset);
+            if (schema.aggregateTypeColumn() != null) {
+                ps.setString(1, aggregateType);
+                ps.setInt(2, limit);
+                ps.setInt(3, offset);
+            } else {
+                ps.setInt(1, limit);
+                ps.setInt(2, offset);
+            }
             return extractFirstColumn(ps.executeQuery());
         } catch (SQLException e) {
             throw new EventStoreException("Failed to find aggregate IDs for type: " + aggregateType, e);
@@ -199,18 +221,20 @@ public class PgEventStoreReader implements EventStoreReader {
         List<StoredEvent> events = new ArrayList<>();
         while (rs.next()) {
             events.add(new StoredEvent(
-                    UUID.fromString(rs.getString(schema.eventIdColumn())),
-                    rs.getString(schema.aggregateIdColumn()),
+                    // Fix 4 + Fix 6: use Objects.toString(getObject()) instead of
+                    // UUID.fromString(getString()). Handles UUID, BIGSERIAL, ULID, String equally.
+                    Objects.toString(rs.getObject(schema.eventIdColumn()), ""),
+                    Objects.toString(rs.getObject(schema.aggregateIdColumn()), ""),
                     schema.aggregateTypeColumn() != null
-                            ? rs.getString(schema.aggregateTypeColumn())
+                            ? Objects.toString(rs.getObject(schema.aggregateTypeColumn()), "unknown")
                             : "unknown",
                     rs.getLong(schema.sequenceColumn()),
                     rs.getString(schema.eventTypeColumn()),
                     rs.getString(schema.payloadColumn()),
-                    schema.metadataColumn() != null
-                            ? rs.getString(schema.metadataColumn())
-                            : "{}",
-                    rs.getTimestamp(schema.timestampColumn()).toInstant(),
+                    // Fix 8: gracefully handle missing or null metadata column
+                    safeGetString(rs, schema.metadataColumn(), "{}"),
+                    // Fix 8: gracefully handle null timestamp (toInstant on null NPE)
+                    safeGetInstant(rs, schema.timestampColumn()),
                     schema.globalPositionColumn() != null
                             ? rs.getLong(schema.globalPositionColumn())
                             : 0));
@@ -218,23 +242,40 @@ public class PgEventStoreReader implements EventStoreReader {
         return events;
     }
 
-    private List<String> extractFirstColumn(ResultSet rs) throws SQLException {
-        List<String> result = new ArrayList<>();
-        while (rs.next())
-            result.add(rs.getString(1));
-        return result;
+    /**
+     * Fix 8: safely read a string column — returns fallback if column is null,
+     * column name is null (optional column not detected), or value is SQL NULL.
+     */
+    private String safeGetString(ResultSet rs, String colName, String fallback) {
+        if (colName == null)
+            return fallback;
+        try {
+            String val = rs.getString(colName);
+            return val != null ? val : fallback;
+        } catch (SQLException e) {
+            log.debug("Could not read optional column '{}': {}", colName, e.getMessage());
+            return fallback;
+        }
     }
 
     /**
-     * Build schema from a manually specified table name, using known column
-     * defaults.
-     * Used when user provides {@code --table} to skip auto-detection.
+     * Fix 8: safely read a timestamp column — returns Instant.EPOCH if the value
+     * is SQL NULL (avoids NullPointerException on rs.getTimestamp().toInstant()).
      */
-    private DetectedSchema buildManualSchema(String tableName) {
-        return new DetectedSchema(
-                tableName,
-                "event_id", "aggregate_id", "aggregate_type",
-                "sequence_number", "event_type", "payload",
-                "metadata", "timestamp", "global_position");
+    private Instant safeGetInstant(ResultSet rs, String colName) {
+        try {
+            Timestamp ts = rs.getTimestamp(colName);
+            return ts != null ? ts.toInstant() : Instant.EPOCH;
+        } catch (SQLException e) {
+            log.debug("Could not read timestamp column '{}': {}", colName, e.getMessage());
+            return Instant.EPOCH;
+        }
+    }
+
+    private List<String> extractFirstColumn(ResultSet rs) throws SQLException {
+        List<String> result = new ArrayList<>();
+        while (rs.next())
+            result.add(Objects.toString(rs.getObject(1), ""));
+        return result;
     }
 }

@@ -63,7 +63,8 @@ public class ServeCommand implements Runnable {
                 config.getDatasource().getUrl(),
                 config.getDatasource().getUsername(),
                 config.getDatasource().getPassword(),
-                config.getDatasource().getTable());
+                config.getDatasource().getTable(),
+                config.getDatasource().getColumns()); // Fix 1: pass column overrides
 
         var reader = new PgEventStoreReader(pgConfig);
         var registry = new ReducerRegistry();
@@ -76,7 +77,7 @@ public class ServeCommand implements Runnable {
 
         var replayEngine = new ReplayEngine(reader, registry);
         var bisectEngine = new BisectEngine(replayEngine, reader);
-        var anomalyDetector = new AnomalyDetector(reader, replayEngine);
+        var anomalyDetector = new AnomalyDetector(reader, replayEngine, config.getAnomaly()); // Fix 11
         var exportEngine = new ExportEngine(reader, replayEngine);
         var diffEngine = new DiffEngine(replayEngine);
 

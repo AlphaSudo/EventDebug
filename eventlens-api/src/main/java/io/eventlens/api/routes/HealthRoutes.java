@@ -2,6 +2,8 @@ package io.eventlens.api.routes;
 
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.http.Context;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -13,6 +15,7 @@ import java.util.Map;
  */
 public class HealthRoutes {
 
+    private static final Logger log = LoggerFactory.getLogger(HealthRoutes.class);
     private final EventStoreReader reader;
 
     public HealthRoutes(EventStoreReader reader) {
@@ -35,8 +38,12 @@ public class HealthRoutes {
                     "aggregateTypes", types.size(),
                     "hasRecentEvents", !recentEvents.isEmpty()));
         } catch (Exception e) {
+            // Fix 9: don't leak JDBC internals (URL, table names, credentials) to
+            // the HTTP response. Log the real cause server-side only.
+            log.error("Event store health check failed", e);
             status.put("status", "DEGRADED");
-            status.put("eventStore", Map.of("status", "DOWN", "error", e.getMessage()));
+            status.put("eventStore", Map.of("status", "DOWN",
+                    "error", "Event store connectivity check failed — see server logs for details"));
             ctx.status(503);
         }
 

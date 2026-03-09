@@ -132,6 +132,7 @@ public class EventLensConfig {
         private String username = "postgres";
         private String password = "";
         private String table; // null = auto-detect
+        private ColumnMappingConfig columns = new ColumnMappingConfig();
 
         public String getUrl() {
             return url;
@@ -163,6 +164,129 @@ public class EventLensConfig {
 
         public void setTable(String table) {
             this.table = table;
+        }
+
+        public ColumnMappingConfig getColumns() {
+            return columns;
+        }
+
+        public void setColumns(ColumnMappingConfig columns) {
+            this.columns = columns;
+        }
+    }
+
+    /**
+     * Fix 1: Explicit column name overrides for projects whose event store schema
+     * does not match EventLens's auto-detection candidates.
+     *
+     * <p>
+     * Usage in eventlens.yaml:
+     * 
+     * <pre>
+     * datasource:
+     *   table: my_events
+     *   columns:
+     *     event-id: uid              # default: event_id / id / uid
+     *     aggregate-id: account_id  # default: aggregate_id / stream_id / entity_id
+     *     aggregate-type: kind       # default: aggregate_type / type (optional)
+     *     sequence: revision         # default: sequence_number / version / seq
+     *     event-type: event_name     # default: event_type / type_name
+     *     payload: body              # default: payload / data / event_data
+     *     metadata: headers          # default: metadata / meta (optional)
+     *     timestamp: created_at      # default: timestamp / occurred_at / created_at
+     *     global-position: log_seq   # default: global_position / global_seq (optional)
+     * </pre>
+     *
+     * Any field left null falls back to auto-detection from the table metadata.
+     */
+    public static class ColumnMappingConfig {
+        private String eventId;
+        private String aggregateId;
+        private String aggregateType;
+        private String sequence;
+        private String eventType;
+        private String payload;
+        private String metadata;
+        private String timestamp;
+        private String globalPosition;
+
+        public String getEventId() {
+            return eventId;
+        }
+
+        public void setEventId(String v) {
+            this.eventId = v;
+        }
+
+        public String getAggregateId() {
+            return aggregateId;
+        }
+
+        public void setAggregateId(String v) {
+            this.aggregateId = v;
+        }
+
+        public String getAggregateType() {
+            return aggregateType;
+        }
+
+        public void setAggregateType(String v) {
+            this.aggregateType = v;
+        }
+
+        public String getSequence() {
+            return sequence;
+        }
+
+        public void setSequence(String v) {
+            this.sequence = v;
+        }
+
+        public String getEventType() {
+            return eventType;
+        }
+
+        public void setEventType(String v) {
+            this.eventType = v;
+        }
+
+        public String getPayload() {
+            return payload;
+        }
+
+        public void setPayload(String v) {
+            this.payload = v;
+        }
+
+        public String getMetadata() {
+            return metadata;
+        }
+
+        public void setMetadata(String v) {
+            this.metadata = v;
+        }
+
+        public String getTimestamp() {
+            return timestamp;
+        }
+
+        public void setTimestamp(String v) {
+            this.timestamp = v;
+        }
+
+        public String getGlobalPosition() {
+            return globalPosition;
+        }
+
+        public void setGlobalPosition(String v) {
+            this.globalPosition = v;
+        }
+
+        /** Returns true if any column override has been set by the user. */
+        public boolean hasAnyOverride() {
+            return eventId != null || aggregateId != null || aggregateType != null
+                    || sequence != null || eventType != null || payload != null
+                    || metadata != null || timestamp != null || globalPosition != null;
         }
     }
 
@@ -210,6 +334,9 @@ public class EventLensConfig {
 
     public static class AnomalyConfig {
         private int scanIntervalSeconds = 60;
+        // Fix 11: cap how many aggregates scanRecent() will process to prevent O(n²)
+        // blowup
+        private int maxAggregatesPerScan = 20;
         private List<AnomalyRuleConfig> rules = List.of();
 
         public int getScanIntervalSeconds() {
@@ -218,6 +345,14 @@ public class EventLensConfig {
 
         public void setScanIntervalSeconds(int s) {
             this.scanIntervalSeconds = s;
+        }
+
+        public int getMaxAggregatesPerScan() {
+            return maxAggregatesPerScan;
+        }
+
+        public void setMaxAggregatesPerScan(int v) {
+            this.maxAggregatesPerScan = v;
         }
 
         public List<AnomalyRuleConfig> getRules() {

@@ -1,5 +1,6 @@
 package io.eventlens.pg;
 
+import io.eventlens.core.EventLensConfig.ColumnMappingConfig;
 import io.eventlens.core.exception.SchemaDetectionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,7 +15,9 @@ import java.util.*;
  *
  * <p>
  * Override with {@code --table} CLI flag or {@code datasource.table} in config
- * when auto-detection fails.
+ * when auto-detection fails. For full control, use the
+ * {@code datasource.columns}
+ * block in eventlens.yaml to map any column name explicitly.
  */
 public class PgSchemaDetector {
 
@@ -39,14 +42,19 @@ public class PgSchemaDetector {
     ) {
     }
 
-    public DetectedSchema detect(DataSource dataSource) {
+    /**
+     * Auto-detect the event store table and columns from the database.
+     * Applies any {@link ColumnMappingConfig} overrides on top of the detected
+     * values.
+     */
+    public DetectedSchema detect(DataSource dataSource, ColumnMappingConfig overrides) {
         try (Connection conn = dataSource.getConnection()) {
             DatabaseMetaData meta = conn.getMetaData();
             for (String candidate : CANDIDATE_TABLES) {
                 try (ResultSet rs = meta.getColumns(null, null, candidate, null)) {
                     if (rs.next()) {
                         log.info("Auto-detected event store table: '{}'", candidate);
-                        return detectColumns(candidate, conn);
+                        return detectColumns(candidate, conn, overrides);
                     }
                 }
             }
@@ -58,7 +66,41 @@ public class PgSchemaDetector {
         }
     }
 
-    private DetectedSchema detectColumns(String table, Connection conn) throws SQLException {
+    /** Backwards-compat overload: detect with no column overrides. */
+    public DetectedSchema detect(DataSource dataSource) {
+        return detect(dataSource, new ColumnMappingConfig());
+    }
+
+    /**
+     * Detect columns for a specific, user-named table.
+     * Still reads real DB metadata for column names — does NOT use the old
+     * hardcoded buildManualSchema() approach. Fix 2.
+     */
+    public DetectedSchema detectForTable(String tableName, DataSource dataSource,
+            ColumnMappingConfig overrides) {
+        try (Connection conn = dataSource.getConnection()) {
+            // Verify the table/view exists
+            try (ResultSet rs = conn.getMetaData().getColumns(null, null, tableName, null)) {
+                if (!rs.next()) {
+                    throw new SchemaDetectionException(
+                            "Table or view '" + tableName + "' not found in the database. " +
+                                    "Check the datasource.table config value.");
+                }
+            }
+            log.info("Using manually configured table/view: '{}'", tableName);
+            return detectColumns(tableName, conn, overrides);
+        } catch (SchemaDetectionException e) {
+            throw e;
+        } catch (SQLException e) {
+            throw new SchemaDetectionException(
+                    "Schema detection failed for table '" + tableName + "'", e);
+        }
+    }
+
+    // ── Private helpers ──────────────────────────────────────────────────────
+
+    private DetectedSchema detectColumns(String table, Connection conn,
+            ColumnMappingConfig overrides) throws SQLException {
         Map<String, String> columns = new LinkedHashMap<>();
         try (ResultSet rs = conn.getMetaData().getColumns(null, null, table, null)) {
             while (rs.next()) {
@@ -69,15 +111,36 @@ public class PgSchemaDetector {
 
         return new DetectedSchema(
                 table,
-                findColumn(columns, table, "event_id", "id", "uid"),
-                findColumn(columns, table, "aggregate_id", "stream_id", "entity_id"),
-                findColumnOrNull(columns, "aggregate_type", "stream_type", "entity_type", "type"),
-                findColumn(columns, table, "sequence_number", "version", "seq", "position", "event_number"),
-                findColumn(columns, table, "event_type", "type_name", "event_name"),
-                findColumn(columns, table, "payload", "data", "event_data", "body"),
-                findColumnOrNull(columns, "metadata", "meta", "headers"),
-                findColumn(columns, table, "timestamp", "created_at", "occurred_at", "event_timestamp"),
-                findColumnOrNull(columns, "global_position", "global_seq", "log_position"));
+                // Fix 1: prefer explicit override, fall back to auto-detection
+                overrides.getEventId() != null
+                        ? overrides.getEventId()
+                        : findColumn(columns, table, "event_id", "id", "uid"),
+                overrides.getAggregateId() != null
+                        ? overrides.getAggregateId()
+                        : findColumn(columns, table, "aggregate_id", "stream_id", "entity_id"),
+                overrides.getAggregateType() != null
+                        ? overrides.getAggregateType()
+                        : findColumnOrNull(columns, "aggregate_type", "stream_type", "entity_type", "type"),
+                overrides.getSequence() != null
+                        ? overrides.getSequence()
+                        : findColumn(columns, table, "sequence_number", "version", "seq", "position", "event_number"),
+                overrides.getEventType() != null
+                        ? overrides.getEventType()
+                        : findColumn(columns, table, "event_type", "type_name", "event_name"),
+                overrides.getPayload() != null
+                        ? overrides.getPayload()
+                        : findColumn(columns, table, "payload", "data", "event_data", "body"),
+                overrides.getMetadata() != null
+                        ? overrides.getMetadata()
+                        : findColumnOrNull(columns, "metadata", "meta", "headers"),
+                overrides.getTimestamp() != null
+                        ? overrides.getTimestamp()
+                        // Fix 3: occurred_at ranks above created_at — created_at is almost always an
+                        // audit column added by ORMs, NOT the semantic event timestamp.
+                        : findColumn(columns, table, "timestamp", "occurred_at", "event_timestamp", "created_at"),
+                overrides.getGlobalPosition() != null
+                        ? overrides.getGlobalPosition()
+                        : findColumnOrNull(columns, "global_position", "global_seq", "log_position"));
     }
 
     private String findColumn(Map<String, String> columns, String table, String... candidates) {
@@ -88,7 +151,7 @@ public class PgSchemaDetector {
         throw new SchemaDetectionException(
                 "Cannot detect required column in table '" + table + "'. " +
                         "Tried: " + Arrays.toString(candidates) + ". " +
-                        "Use --table or override column mapping in config.");
+                        "Use datasource.columns config to specify the column name explicitly.");
     }
 
     private String findColumnOrNull(Map<String, String> columns, String... candidates) {

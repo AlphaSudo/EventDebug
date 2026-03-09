@@ -1,5 +1,6 @@
 package io.eventlens.core.engine;
 
+import io.eventlens.core.EventLensConfig.AnomalyConfig;
 import io.eventlens.core.model.*;
 import io.eventlens.core.spi.EventStoreReader;
 import org.slf4j.Logger;
@@ -19,10 +20,22 @@ public class AnomalyDetector {
     private final EventStoreReader reader;
     private final ReplayEngine replayEngine;
     private final List<AnomalyRule> rules = new ArrayList<>();
+    // Fix 11: max aggregates per scanRecent() to prevent O(n²) blowup on busy
+    // stores
+    private final int maxAggregatesPerScan;
 
     public AnomalyDetector(EventStoreReader reader, ReplayEngine replayEngine) {
+        this(reader, replayEngine, 20);
+    }
+
+    public AnomalyDetector(EventStoreReader reader, ReplayEngine replayEngine, AnomalyConfig config) {
+        this(reader, replayEngine, config != null ? config.getMaxAggregatesPerScan() : 20);
+    }
+
+    public AnomalyDetector(EventStoreReader reader, ReplayEngine replayEngine, int maxAggregatesPerScan) {
         this.reader = reader;
         this.replayEngine = replayEngine;
+        this.maxAggregatesPerScan = maxAggregatesPerScan;
         registerDefaultRules();
     }
 
@@ -77,12 +90,31 @@ public class AnomalyDetector {
         return anomalies;
     }
 
-    /** Scan recent events (grouped by aggregate) for anomalies. */
+    /**
+     * Scan recent events (grouped by aggregate) for anomalies.
+     *
+     * <p>
+     * Fix 11: caps the number of aggregates scanned to {@code maxAggregatesPerScan}
+     * (default: 20, configurable via {@code anomaly.max-aggregates-per-scan}).
+     * Without this cap, a busy event store with 100 recent events across 50
+     * aggregates
+     * could trigger 50 full replays in a single HTTP request — O(n²) in event
+     * count.
+     */
     public List<AnomalyReport> scanRecent(int limit) {
         List<StoredEvent> recent = reader.getRecentEvents(limit);
+        // Preserve insertion order, deduplicate aggregate IDs
         Map<String, String> seen = new LinkedHashMap<>();
         for (StoredEvent e : recent) {
             seen.put(e.aggregateId(), e.aggregateType());
+            if (seen.size() >= maxAggregatesPerScan)
+                break; // Fix 11: cap here
+        }
+
+        if (seen.size() >= maxAggregatesPerScan) {
+            log.debug("scanRecent: capped at {} aggregates (max-aggregates-per-scan={}). "
+                    + "Increase anomaly.max-aggregates-per-scan to scan more.",
+                    seen.size(), maxAggregatesPerScan);
         }
 
         List<AnomalyReport> all = new ArrayList<>();

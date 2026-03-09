@@ -1,5 +1,74 @@
 [
   {
+    "name" : "io.eventlens.cli.BisectCommand",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true,
+    "fields" : [
+      { "name" : "aggregateId" },
+      { "name" : "condition" },
+      { "name" : "db" }
+    ]
+  },
+  {
+    "name" : "io.eventlens.cli.DatabaseOptions",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true,
+    "fields" : [
+      { "name" : "dbPassword" },
+      { "name" : "dbUrl" },
+      { "name" : "dbUser" },
+      { "name" : "tableName" }
+    ]
+  },
+  {
+    "name" : "io.eventlens.cli.DiffCommand",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true,
+    "fields" : [
+      { "name" : "aggregateIdA" },
+      { "name" : "aggregateIdB" },
+      { "name" : "db" }
+    ]
+  },
+  {
+    "name" : "io.eventlens.cli.EventLensCli",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true
+  },
+  {
+    "name" : "io.eventlens.cli.ExportCommand",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true,
+    "fields" : [
+      { "name" : "aggregateId" },
+      { "name" : "db" },
+      { "name" : "format" },
+      { "name" : "outputPath" }
+    ]
+  },
+  {
+    "name" : "io.eventlens.cli.ReplayCommand",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true,
+    "fields" : [
+      { "name" : "aggregateId" },
+      { "name" : "db" },
+      { "name" : "toEvent" }
+    ]
+  },
+  {
     "name" : "io.eventlens.cli.ServeCommand",
     "allDeclaredConstructors" : true,
     "allPublicConstructors" : true,
@@ -23,5 +92,23 @@
     "allPublicConstructors" : true,
     "allDeclaredMethods" : true,
     "allPublicMethods" : true
+  },
+  {
+    "name" : "java.lang.Long",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true
+  },
+  {
+    "name" : "picocli.CommandLine$AutoHelpMixin",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true,
+    "fields" : [
+      { "name" : "helpRequested" },
+      { "name" : "versionRequested" }
+    ]
   }
 ]

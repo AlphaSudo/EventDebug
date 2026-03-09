@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eventlens-config
+  namespace: default
+data:
+  eventlens.yaml: |
+    server:
+      port: 9090
+      allowed-origins:
+        - "*"
+      auth:
+        enabled: false
+
+    datasource:
+      # TODO: CHANGE THIS to your k3s postgres service!
+      # Example: jdbc:postgresql://my-postgres-svc:5432/my_database
+      url: jdbc:postgresql://<postgres-service-name>:5432/<database_name>
+      username: <postgres_user>
+      password: <postgres_password>
+      table: event_store  # Or leave blank for auto-detect
+
+    kafka:
+      # TODO: CHANGE THIS to your k3s kafka service!
+      # Example: my-kafka-svc:9092
+      bootstrap-servers: <kafka-service-name>:9092
+      topic: domain-events
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eventlens
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eventlens
+  template:
+    metadata:
+      labels:
+        app: eventlens
+    spec:
+      containers:
+        - name: eventlens
+          # Here we pull the exact image you just pushed!
+          image: docker.io/alphasudo2/eventlens-app:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config-volume
+              # Mount the ConfigMap as a file at /app/eventlens.yaml
+              mountPath: /app/eventlens.yaml
+              subPath: eventlens.yaml
+      volumes:
+        - name: config-volume
+          configMap:
+            name: eventlens-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eventlens-ui
+  namespace: default
+spec:
+  # Exposes the UI outside of k3s on a random port (usually 30000-32767)
+  type: NodePort 
+  selector:
+    app: eventlens
+  ports:
+    - protocol: TCP
+      port: 9090
+      targetPort: 9090

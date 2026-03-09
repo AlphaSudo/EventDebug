@@ -42,7 +42,14 @@ public class EventLensServer {
             cfg.jsonMapper(new JavalinJackson());
             cfg.bundledPlugins.enableCors(cors -> cors.addRule(rule -> {
                 var origins = config.getServer().getAllowedOrigins();
-                if (origins != null && !origins.isEmpty()) {
+                if (origins == null || origins.isEmpty()) {
+                    // No origins configured: default to localhost only (same as built-in default)
+                    rule.allowHost("http://localhost:" + config.getServer().getPort());
+                } else if (origins.contains("*")) {
+                    // Fix 5: "*" in the list → anyHost(), instead of crashing with
+                    // IllegalArgumentException("* is not a valid host").
+                    rule.anyHost();
+                } else {
                     origins.forEach(rule::allowHost);
                 }
             }));
