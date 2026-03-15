@@ -110,8 +110,12 @@ public class BisectEngine {
             throw new ConditionParseException("<empty>", "expression cannot be empty");
         }
 
-        // Sanitize: only allow safe characters
-        if (!expression.matches("[\\w.\\s<>=!]+")) {
+        // Sanitize: only allow safe characters; dots not supported (no nested field access)
+        if (expression.contains(".")) {
+            throw new ConditionParseException(expression,
+                    "nested field access (e.g. field.sub) is not supported; use top-level field names only");
+        }
+        if (!expression.matches("[\\w\\s<>=!]+")) {
             throw new ConditionParseException(expression,
                     "expression contains invalid characters. Allowed: letters, numbers, spaces, and operators (< > = !)");
         }

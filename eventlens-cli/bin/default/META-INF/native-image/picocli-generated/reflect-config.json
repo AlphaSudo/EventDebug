@@ -37,13 +37,6 @@
     ]
   },
   {
-    "name" : "io.eventlens.cli.EventLensCli",
-    "allDeclaredConstructors" : true,
-    "allPublicConstructors" : true,
-    "allDeclaredMethods" : true,
-    "allPublicMethods" : true
-  },
-  {
     "name" : "io.eventlens.cli.ExportCommand",
     "allDeclaredConstructors" : true,
     "allPublicConstructors" : true,
@@ -99,16 +92,5 @@
     "allPublicConstructors" : true,
     "allDeclaredMethods" : true,
     "allPublicMethods" : true
-  },
-  {
-    "name" : "picocli.CommandLine$AutoHelpMixin",
-    "allDeclaredConstructors" : true,
-    "allPublicConstructors" : true,
-    "allDeclaredMethods" : true,
-    "allPublicMethods" : true,
-    "fields" : [
-      { "name" : "helpRequested" },
-      { "name" : "versionRequested" }
-    ]
   }
 ]

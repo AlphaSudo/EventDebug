@@ -368,6 +368,7 @@ public class EventLensConfig {
         private String code;
         private String condition;
         private String severity = "MEDIUM";
+        private String description;
 
         public String getCode() {
             return code;
@@ -391,6 +392,14 @@ public class EventLensConfig {
 
         public void setSeverity(String s) {
             this.severity = s;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+
+        public void setDescription(String d) {
+            this.description = d;
         }
     }
 

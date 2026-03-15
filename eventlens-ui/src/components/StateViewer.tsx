@@ -1,4 +1,5 @@
 import { useReplay } from '../hooks/useReplay';
+import { parseEventTimestamp } from '../utils/time';
 import StateDiff from './StateDiff';
 
 interface Props {
@@ -44,7 +45,7 @@ export default function StateViewer({ aggregateId, sequence }: Props) {
 
             {/* Metadata */}
             <div className="event-meta">
-                <span>🕐 {new Date(event.timestamp).toLocaleString()}</span>
+                <span>🕐 {parseEventTimestamp(event.timestamp).toLocaleString()}</span>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>ID: {event.eventId.slice(0, 8)}…</span>
                 {metadata.correlationId && <span>🔗 {metadata.correlationId}</span>}
                 {metadata.userId && <span>👤 {metadata.userId}</span>}

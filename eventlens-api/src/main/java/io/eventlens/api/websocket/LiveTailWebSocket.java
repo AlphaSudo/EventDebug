@@ -27,17 +27,21 @@ import java.util.concurrent.*;
  *
  * <p>
  * On connect: sends the last 20 events as backfill so clients don't join a
- * blank screen.
+ * blank screen. Backfill is sent asynchronously to avoid blocking the
+ * Jetty onConnect handler thread.
  */
 public class LiveTailWebSocket {
 
     private static final Logger log = LoggerFactory.getLogger(LiveTailWebSocket.class);
+    private static final int MAX_CONNECTIONS = 500;
 
     private final Set<WsContext> sessions = ConcurrentHashMap.newKeySet();
     private final ObjectMapper mapper = new ObjectMapper()
             .findAndRegisterModules()
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     private final EventStoreReader reader;
+    private final ExecutorService backfillExecutor = Executors.newCachedThreadPool(
+            Thread.ofVirtual().name("eventlens-backfill-", 0).factory());
 
     public LiveTailWebSocket(EventStoreReader reader) {
         this.reader = reader;
@@ -49,14 +53,16 @@ public class LiveTailWebSocket {
     public void configure(Javalin app) {
         app.ws("/ws/live", ws -> {
             ws.onConnect(ctx -> {
-                sessions.add(ctx);
-                log.debug("WebSocket client connected: {}", ctx.sessionId());
-
-                // Backfill last 20 events
-                var recent = reader.getRecentEvents(20);
-                for (var event : recent) {
-                    sendTo(ctx, event);
+                if (sessions.size() >= MAX_CONNECTIONS) {
+                    log.warn("WebSocket connection rejected: max connections ({}) reached", MAX_CONNECTIONS);
+                    ctx.session.close(1008, "Too many connections");
+                    return;
                 }
+                ctx.enableAutomaticPings(15, TimeUnit.SECONDS);
+                sessions.add(ctx);
+                log.debug("WebSocket client connected: {} ({} active)", ctx.sessionId(), sessions.size());
+
+                backfillExecutor.submit(() -> backfill(ctx));
             });
 
             ws.onClose(ctx -> {
@@ -66,8 +72,25 @@ public class LiveTailWebSocket {
 
             ws.onError(ctx -> {
                 sessions.remove(ctx);
+                log.debug("WebSocket error for session: {}", ctx.sessionId());
             });
         });
+    }
+
+    private void backfill(WsContext ctx) {
+        try {
+            Thread.sleep(250);
+            if (!ctx.session.isOpen()) return;
+            var recent = reader.getRecentEvents(20);
+            for (var event : recent) {
+                if (!ctx.session.isOpen()) break;
+                trySend(ctx, event);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            log.debug("Backfill failed for {}: {}", ctx.sessionId(), e.getMessage());
+        }
     }
 
     /** Broadcast a new event to all connected clients. */
@@ -75,13 +98,8 @@ public class LiveTailWebSocket {
         if (sessions.isEmpty())
             return;
         sessions.removeIf(session -> {
-            try {
-                sendTo(session, event);
-                return false;
-            } catch (Exception e) {
-                log.debug("Removed dead WebSocket session: {}", session.sessionId());
-                return true;
-            }
+            if (!session.session.isOpen()) return true;
+            return !trySend(session, event);
         });
     }
 
@@ -112,11 +130,17 @@ public class LiveTailWebSocket {
         log.info("PostgreSQL polling live tail started (fallback mode)");
     }
 
-    private void sendTo(WsContext ctx, StoredEvent event) {
+    /**
+     * Non-throwing send. Returns true if the message was sent successfully.
+     */
+    private boolean trySend(WsContext ctx, StoredEvent event) {
+        if (!ctx.session.isOpen()) return false;
         try {
             ctx.send(mapper.writeValueAsString(event));
+            return true;
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            log.debug("WebSocket send failed for {}: {}", ctx.sessionId(), e.getMessage());
+            return false;
         }
     }
 }

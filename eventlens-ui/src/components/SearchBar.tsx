@@ -42,7 +42,7 @@ export default function SearchBar({ onSelect }: Props) {
                 id="aggregate-search"
                 type="text"
                 className="search-input"
-                placeholder="Search for an aggregate ID (e.g. ACC-001)"
+                placeholder="Search by aggregate ID (e.g. UUID or stream key)"
                 value={query}
                 onChange={e => { setQuery(e.target.value); setOpen(true); }}
                 onFocus={() => query.length >= 2 && setOpen(true)}

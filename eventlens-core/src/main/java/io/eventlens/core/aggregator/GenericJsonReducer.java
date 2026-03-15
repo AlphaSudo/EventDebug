@@ -5,18 +5,17 @@ import io.eventlens.core.model.StoredEvent;
 import java.util.*;
 
 /**
- * Default reducer that uses event-type heuristics for JSON merging.
- * Applied when no custom reducer is registered for an aggregate type.
+ * Generic reducer that merges event payloads into state. Works with any domain
+ * (orders, tickets, accounts, etc.). Applied when no custom reducer is registered.
  *
  * <p>
- * Heuristics:
+ * Heuristics (domain-agnostic):
  * <ul>
- * <li>{@code *Created / *Opened} — merge all payload fields into state</li>
- * <li>{@code *Deleted / *Closed} — set status=DELETED and merge</li>
- * <li>{@code *Deposit / *Credit / *Added} — accumulate numeric fields</li>
- * <li>{@code *Withdrawn / *Debit / *Subtract} — subtract numeric fields</li>
- * <li>Everything else — direct overwrite</li>
+ * <li>{@code *Created / *Opened / *Placed / *Submitted} — merge full payload into state</li>
+ * <li>{@code *Deleted / *Closed / *Cancelled / *Rejected} — set status and merge payload</li>
+ * <li>Everything else — merge payload fields into state (overwrite per key)</li>
  * </ul>
+ * No domain-specific arithmetic (e.g. deposit/withdraw); state is built from event payloads only.
  */
 public class GenericJsonReducer implements AggregateReducer {
 
@@ -25,35 +24,19 @@ public class GenericJsonReducer implements AggregateReducer {
         var newState = new LinkedHashMap<>(currentState);
         var payload = event.parsedPayload();
 
-        // Always track internal metadata
         newState.put("_version", event.sequenceNumber());
         newState.put("_lastEventType", event.eventType());
         newState.put("_lastUpdated", event.timestamp().toString());
 
         String type = event.eventType().toLowerCase();
 
-        if (type.contains("created") || type.contains("opened")) {
+        if (type.contains("created") || type.contains("opened") || type.contains("placed") || type.contains("submitted")) {
             newState.putAll(payload);
-        } else if (type.contains("deleted") || type.contains("closed")) {
+        } else if (type.contains("deleted") || type.contains("closed") || type.contains("cancelled") || type.contains("rejected")) {
             newState.put("status", "DELETED");
             newState.putAll(payload);
         } else {
-            for (var entry : payload.entrySet()) {
-                String key = entry.getKey();
-                Object value = entry.getValue();
-
-                if (value instanceof Number newNum && currentState.get(key) instanceof Number oldNum) {
-                    if (type.contains("deposit") || type.contains("credit") || type.contains("added")) {
-                        newState.put(key, oldNum.doubleValue() + newNum.doubleValue());
-                    } else if (type.contains("withdraw") || type.contains("debit") || type.contains("subtract")) {
-                        newState.put(key, oldNum.doubleValue() - newNum.doubleValue());
-                    } else {
-                        newState.put(key, value);
-                    }
-                } else {
-                    newState.put(key, value);
-                }
-            }
+            newState.putAll(payload);
         }
 
         return Collections.unmodifiableMap(newState);

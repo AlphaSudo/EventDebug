@@ -23,10 +23,13 @@ public class PgSchemaDetector {
 
     private static final Logger log = LoggerFactory.getLogger(PgSchemaDetector.class);
 
-    // Well-known event store table names, in order of preference
+    // Well-known event store table names, in order of preference.
+    // Covers: generic, Axon, Marten, Akka Persistence, eugene-khyst, outbox pattern
     private static final List<String> CANDIDATE_TABLES = List.of(
             "event_store", "events", "domain_events", "stored_events",
-            "event_log", "aggregate_events", "es_events");
+            "event_log", "aggregate_events", "es_events",
+            "es_event", "mt_events", "domain_event_entry",
+            "event_journal", "outbox_event");
 
     public record DetectedSchema(
             String tableName,
@@ -37,8 +40,8 @@ public class PgSchemaDetector {
             String eventTypeColumn,
             String payloadColumn,
             String metadataColumn, // nullable
-            String timestampColumn,
-            String globalPositionColumn // nullable
+            String timestampColumn, // nullable — epoch fallback when absent
+            String globalPositionColumn // nullable — event_id fallback when absent
     ) {
     }
 
@@ -109,38 +112,48 @@ public class PgSchemaDetector {
         }
         log.debug("Columns for table '{}': {}", table, columns.keySet());
 
-        return new DetectedSchema(
+        var detected = new DetectedSchema(
                 table,
-                // Fix 1: prefer explicit override, fall back to auto-detection
                 overrides.getEventId() != null
                         ? overrides.getEventId()
                         : findColumn(columns, table, "event_id", "id", "uid"),
                 overrides.getAggregateId() != null
                         ? overrides.getAggregateId()
-                        : findColumn(columns, table, "aggregate_id", "stream_id", "entity_id"),
+                        : findColumn(columns, table, "aggregate_id", "stream_id", "entity_id", "stream_key"),
                 overrides.getAggregateType() != null
                         ? overrides.getAggregateType()
-                        : findColumnOrNull(columns, "aggregate_type", "stream_type", "entity_type", "type"),
+                        : findColumnOrNull(columns, "aggregate_type", "stream_type", "entity_type"),
                 overrides.getSequence() != null
                         ? overrides.getSequence()
-                        : findColumn(columns, table, "sequence_number", "version", "seq", "position", "event_number"),
+                        : findColumn(columns, table, "sequence_number", "version", "seq", "position", "event_number", "revision"),
                 overrides.getEventType() != null
                         ? overrides.getEventType()
-                        : findColumn(columns, table, "event_type", "type_name", "event_name"),
+                        : findColumn(columns, table, "event_type", "type_name", "event_name", "type"),
                 overrides.getPayload() != null
                         ? overrides.getPayload()
-                        : findColumn(columns, table, "payload", "data", "event_data", "body"),
+                        : findColumn(columns, table, "payload", "data", "event_data", "body",
+                                "json_data", "json_payload", "event_body", "event_payload"),
                 overrides.getMetadata() != null
                         ? overrides.getMetadata()
                         : findColumnOrNull(columns, "metadata", "meta", "headers"),
                 overrides.getTimestamp() != null
                         ? overrides.getTimestamp()
-                        // Fix 3: occurred_at ranks above created_at — created_at is almost always an
-                        // audit column added by ORMs, NOT the semantic event timestamp.
-                        : findColumn(columns, table, "timestamp", "occurred_at", "event_timestamp", "created_at"),
+                        : findColumnOrNull(columns, "timestamp", "occurred_at", "event_timestamp",
+                                "created_at", "inserted_at"),
                 overrides.getGlobalPosition() != null
                         ? overrides.getGlobalPosition()
-                        : findColumnOrNull(columns, "global_position", "global_seq", "log_position"));
+                        : findColumnOrNull(columns, "global_position", "global_seq", "log_position",
+                                "seq_id", "transaction_id"));
+
+        if (detected.timestampColumn() == null) {
+            log.warn("No timestamp column detected in '{}'; events will use epoch as timestamp. "
+                    + "Override with datasource.columns.timestamp in eventlens.yaml.", table);
+        }
+        if (detected.globalPositionColumn() == null) {
+            log.info("No global_position column in '{}'; live tail will use '{}' as surrogate.",
+                    table, detected.eventIdColumn());
+        }
+        return detected;
     }
 
     private String findColumn(Map<String, String> columns, String table, String... candidates) {

@@ -1,6 +1,7 @@
 package io.eventlens.core.engine;
 
 import io.eventlens.core.EventLensConfig.AnomalyConfig;
+import io.eventlens.core.EventLensConfig.AnomalyRuleConfig;
 import io.eventlens.core.model.*;
 import io.eventlens.core.spi.EventStoreReader;
 import org.slf4j.Logger;
@@ -8,6 +9,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 
 /**
  * Rule-based anomaly detector. Scans an aggregate's full state history
@@ -30,6 +32,9 @@ public class AnomalyDetector {
 
     public AnomalyDetector(EventStoreReader reader, ReplayEngine replayEngine, AnomalyConfig config) {
         this(reader, replayEngine, config != null ? config.getMaxAggregatesPerScan() : 20);
+        if (config != null && config.getRules() != null) {
+            loadConfigRules(config.getRules());
+        }
     }
 
     public AnomalyDetector(EventStoreReader reader, ReplayEngine replayEngine, int maxAggregatesPerScan) {
@@ -40,17 +45,6 @@ public class AnomalyDetector {
     }
 
     private void registerDefaultRules() {
-        // Rule: negative balance
-        rules.add(new AnomalyRule(
-                "NEGATIVE_BALANCE",
-                "Balance went negative",
-                AnomalyReport.Severity.HIGH,
-                (event, state) -> {
-                    Object balance = state.get("balance");
-                    return balance instanceof Number n && n.doubleValue() < 0;
-                }));
-
-        // Rule: aggregate may need a snapshot
         rules.add(new AnomalyRule(
                 "SNAPSHOT_NEEDED",
                 "Aggregate has many events without snapshot (performance risk)",
@@ -59,6 +53,32 @@ public class AnomalyDetector {
                     Object version = state.get("_version");
                     return version instanceof Number n && n.longValue() > 50 && n.longValue() % 50 == 0;
                 }));
+    }
+
+    /**
+     * Load user-defined anomaly rules from YAML config.
+     * Each rule's condition is parsed via {@link BisectEngine#parseCondition}
+     * using the format: {@code "field operator value"} (e.g. "price < 0").
+     */
+    private void loadConfigRules(List<AnomalyRuleConfig> ruleConfigs) {
+        for (AnomalyRuleConfig rc : ruleConfigs) {
+            try {
+                Predicate<Map<String, Object>> condition = BisectEngine.parseCondition(rc.getCondition());
+                AnomalyReport.Severity severity = AnomalyReport.Severity.valueOf(
+                        rc.getSeverity().toUpperCase());
+                String description = rc.getDescription() != null
+                        ? rc.getDescription()
+                        : rc.getCondition();
+
+                rules.add(new AnomalyRule(rc.getCode(), description, severity,
+                        (event, state) -> condition.test(state)));
+
+                log.info("Loaded config anomaly rule: '{}' [{}] condition='{}'",
+                        rc.getCode(), severity, rc.getCondition());
+            } catch (Exception e) {
+                log.error("Failed to load anomaly rule '{}': {}", rc.getCode(), e.getMessage());
+            }
+        }
     }
 
     /** Register a custom anomaly rule. */

@@ -68,10 +68,10 @@ public class ExportEngine {
         for (int i = 0; i < events.size(); i++) {
             StoredEvent e = events.get(i);
             sb.append("            Map.of(\n");
-            sb.append("                \"eventType\", \"").append(e.eventType()).append("\",\n");
+            sb.append("                \"eventType\", \"").append(escapeJavaString(e.eventType())).append("\",\n");
             sb.append("                \"sequenceNumber\", ").append(e.sequenceNumber()).append(",\n");
-            sb.append("                \"payload\", \"\"\"").append(e.payload()).append("\"\"\",\n");
-            sb.append("                \"timestamp\", \"").append(e.timestamp()).append("\"\n");
+            sb.append("                \"payload\", \"").append(escapeJavaString(e.payload())).append("\",\n");
+            sb.append("                \"timestamp\", \"").append(escapeJavaString(e.timestamp().toString())).append("\"\n");
             sb.append("            )").append(i < events.size() - 1 ? "," : "").append("\n");
         }
 
@@ -101,14 +101,30 @@ public class ExportEngine {
     private String exportCsv(List<StoredEvent> events) {
         StringBuilder sb = new StringBuilder("sequence,event_type,timestamp,payload\n");
         for (var e : events) {
-            sb.append(String.format("%d,%s,%s,\"%s\"%n",
-                    e.sequenceNumber(), e.eventType(), e.timestamp(),
-                    e.payload().replace("\"", "\"\"")));
+            sb.append(String.format("%d,%s,%s,%s%n",
+                    e.sequenceNumber(),
+                    escapeCsvField(e.eventType()),
+                    escapeCsvField(e.timestamp().toString()),
+                    escapeCsvField(e.payload())));
         }
         return sb.toString();
     }
 
+    private static String escapeCsvField(String value) {
+        if (value == null) return "\"\"";
+        return "\"" + value.replace("\"", "\"\"") + "\"";
+    }
+
     private String sanitize(String id) {
         return id.replaceAll("[^a-zA-Z0-9_]", "_");
+    }
+
+    private static String escapeJavaString(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 }

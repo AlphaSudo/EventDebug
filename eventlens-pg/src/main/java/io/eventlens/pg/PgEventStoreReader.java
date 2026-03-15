@@ -61,9 +61,12 @@ public class PgEventStoreReader implements EventStoreReader {
 
     @Override
     public List<StoredEvent> getEvents(String aggregateId, int limit, int offset) {
+        String table = quoteIdentifier(schema.tableName());
+        String aggCol = quoteIdentifier(schema.aggregateIdColumn());
+        String seqCol = quoteIdentifier(schema.sequenceColumn());
         String sql = String.format(
                 "SELECT * FROM %s WHERE %s = ? ORDER BY %s ASC LIMIT ? OFFSET ?",
-                schema.tableName(), schema.aggregateIdColumn(), schema.sequenceColumn());
+                table, aggCol, seqCol);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, aggregateId);
@@ -77,10 +80,12 @@ public class PgEventStoreReader implements EventStoreReader {
 
     @Override
     public List<StoredEvent> getEventsUpTo(String aggregateId, long maxSequence) {
+        String table = quoteIdentifier(schema.tableName());
+        String aggCol = quoteIdentifier(schema.aggregateIdColumn());
+        String seqCol = quoteIdentifier(schema.sequenceColumn());
         String sql = String.format(
                 "SELECT * FROM %s WHERE %s = ? AND %s <= ? ORDER BY %s ASC",
-                schema.tableName(), schema.aggregateIdColumn(),
-                schema.sequenceColumn(), schema.sequenceColumn());
+                table, aggCol, seqCol, seqCol);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, aggregateId);
@@ -93,19 +98,19 @@ public class PgEventStoreReader implements EventStoreReader {
 
     @Override
     public List<String> findAggregateIds(String aggregateType, int limit, int offset) {
-        // Fix 7: correct SQL when aggregateTypeColumn is null — avoid "WHERE 1=1 = ?"
+        String table = quoteIdentifier(schema.tableName());
+        String aggCol = quoteIdentifier(schema.aggregateIdColumn());
         final String sql;
         if (schema.aggregateTypeColumn() != null) {
+            String typeCol = quoteIdentifier(schema.aggregateTypeColumn());
             sql = String.format(
                     "SELECT DISTINCT %s FROM %s WHERE %s = ? ORDER BY %s LIMIT ? OFFSET ?",
-                    schema.aggregateIdColumn(), schema.tableName(),
-                    schema.aggregateTypeColumn(), schema.aggregateIdColumn());
+                    aggCol, table, typeCol, aggCol);
         } else {
-            // No aggregate type column — return all aggregate IDs, ignoring the type filter
             log.debug("No aggregate type column detected; returning all aggregate IDs (type filter ignored)");
             sql = String.format(
                     "SELECT DISTINCT %s FROM %s ORDER BY %s LIMIT ? OFFSET ?",
-                    schema.aggregateIdColumn(), schema.tableName(), schema.aggregateIdColumn());
+                    aggCol, table, aggCol);
         }
 
         try (Connection conn = dataSource.getConnection();
@@ -128,10 +133,14 @@ public class PgEventStoreReader implements EventStoreReader {
     public List<StoredEvent> getRecentEvents(int limit) {
         String orderCol = schema.globalPositionColumn() != null
                 ? schema.globalPositionColumn()
-                : schema.timestampColumn();
+                : schema.timestampColumn() != null
+                        ? schema.timestampColumn()
+                        : schema.eventIdColumn();
+        String table = quoteIdentifier(schema.tableName());
+        String orderColQ = quoteIdentifier(orderCol);
         String sql = String.format(
                 "SELECT * FROM %s ORDER BY %s DESC LIMIT ?",
-                schema.tableName(), orderCol);
+                table, orderColQ);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, limit);
@@ -145,13 +154,14 @@ public class PgEventStoreReader implements EventStoreReader {
 
     @Override
     public List<StoredEvent> getEventsAfter(long globalPosition, int limit) {
-        if (schema.globalPositionColumn() == null) {
-            log.warn("globalPositionColumn not detected — live tail polling is degraded");
-            return List.of();
-        }
+        String posColumn = schema.globalPositionColumn() != null
+                ? schema.globalPositionColumn()
+                : schema.eventIdColumn();
+        String table = quoteIdentifier(schema.tableName());
+        String posColQ = quoteIdentifier(posColumn);
         String sql = String.format(
                 "SELECT * FROM %s WHERE %s > ? ORDER BY %s ASC LIMIT ?",
-                schema.tableName(), schema.globalPositionColumn(), schema.globalPositionColumn());
+                table, posColQ, posColQ);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, globalPosition);
@@ -164,9 +174,11 @@ public class PgEventStoreReader implements EventStoreReader {
 
     @Override
     public long countEvents(String aggregateId) {
+        String table = quoteIdentifier(schema.tableName());
+        String aggCol = quoteIdentifier(schema.aggregateIdColumn());
         String sql = String.format(
                 "SELECT COUNT(*) FROM %s WHERE %s = ?",
-                schema.tableName(), schema.aggregateIdColumn());
+                table, aggCol);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, aggregateId);
@@ -181,9 +193,11 @@ public class PgEventStoreReader implements EventStoreReader {
     public List<String> getAggregateTypes() {
         if (schema.aggregateTypeColumn() == null)
             return List.of();
+        String table = quoteIdentifier(schema.tableName());
+        String typeCol = quoteIdentifier(schema.aggregateTypeColumn());
         String sql = String.format(
                 "SELECT DISTINCT %s FROM %s ORDER BY %s",
-                schema.aggregateTypeColumn(), schema.tableName(), schema.aggregateTypeColumn());
+                typeCol, table, typeCol);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
             return extractFirstColumn(ps.executeQuery());
@@ -194,10 +208,11 @@ public class PgEventStoreReader implements EventStoreReader {
 
     @Override
     public List<String> searchAggregates(String query, int limit) {
+        String table = quoteIdentifier(schema.tableName());
+        String aggCol = quoteIdentifier(schema.aggregateIdColumn());
         String sql = String.format(
                 "SELECT DISTINCT %s FROM %s WHERE %s ILIKE ? ORDER BY %s LIMIT ?",
-                schema.aggregateIdColumn(), schema.tableName(),
-                schema.aggregateIdColumn(), schema.aggregateIdColumn());
+                aggCol, table, aggCol, aggCol);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, "%" + query + "%");
@@ -213,6 +228,16 @@ public class PgEventStoreReader implements EventStoreReader {
             dataSource.close();
             log.info("PostgreSQL connection pool closed");
         }
+    }
+
+    /**
+     * Quote a PostgreSQL identifier to prevent SQL injection and handle reserved words.
+     * Escapes double quotes inside the identifier by doubling them.
+     */
+    private static String quoteIdentifier(String identifier) {
+        if (identifier == null || identifier.isEmpty())
+            throw new IllegalArgumentException("Identifier cannot be null or empty");
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────
@@ -237,7 +262,7 @@ public class PgEventStoreReader implements EventStoreReader {
                     safeGetInstant(rs, schema.timestampColumn()),
                     schema.globalPositionColumn() != null
                             ? rs.getLong(schema.globalPositionColumn())
-                            : 0));
+                            : safeGetLong(rs, schema.eventIdColumn())));
         }
         return events;
     }
@@ -259,10 +284,28 @@ public class PgEventStoreReader implements EventStoreReader {
     }
 
     /**
-     * Fix 8: safely read a timestamp column — returns Instant.EPOCH if the value
-     * is SQL NULL (avoids NullPointerException on rs.getTimestamp().toInstant()).
+     * Safely read a long column — returns 0 if the column value cannot be
+     * parsed as a long (e.g. UUID primary keys). Used as fallback global
+     * position when the event_id is BIGSERIAL.
+     */
+    private long safeGetLong(ResultSet rs, String colName) {
+        try {
+            return rs.getLong(colName);
+        } catch (SQLException e) {
+            try {
+                return Long.parseLong(Objects.toString(rs.getObject(colName), "0"));
+            } catch (Exception ignored) {
+                return 0;
+            }
+        }
+    }
+
+    /**
+     * Safely read a timestamp column — returns Instant.EPOCH if the column
+     * name is null (not detected), the value is SQL NULL, or the read fails.
      */
     private Instant safeGetInstant(ResultSet rs, String colName) {
+        if (colName == null) return Instant.EPOCH;
         try {
             Timestamp ts = rs.getTimestamp(colName);
             return ts != null ? ts.toInstant() : Instant.EPOCH;

@@ -102,13 +102,19 @@ public class ServeCommand implements Runnable {
         var liveTail = new LiveTailWebSocket(reader);
         liveTail.configure(server.getApp());
 
+        final KafkaLiveTail kafkaToClose = kafkaTail;
         if (kafkaTail != null) {
-            var finalKafkaTail = kafkaTail;
-            finalKafkaTail.addListener(liveTail::broadcast);
-            finalKafkaTail.start();
+            kafkaTail.addListener(liveTail::broadcast);
+            kafkaTail.start();
         } else {
             liveTail.startPolling();
         }
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            server.stop();
+            if (kafkaToClose != null) kafkaToClose.close();
+            reader.close();
+        }, "eventlens-shutdown"));
 
         server.start();
 

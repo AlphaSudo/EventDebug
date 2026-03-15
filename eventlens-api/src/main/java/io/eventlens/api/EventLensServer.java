@@ -58,19 +58,33 @@ public class EventLensServer {
         // ── Security middleware ────────────────────────────────────────────
         var authConfig = config.getServer().getAuth();
         if (authConfig.isEnabled()) {
+            if ("changeme".equals(authConfig.getPassword())) {
+                log.warn("Basic auth is enabled with default password 'changeme'. Change server.auth.password in production.");
+            }
+            String expectedAuth = authConfig.getUsername() + ":" + authConfig.getPassword();
             app.before("/api/*", ctx -> {
                 String auth = ctx.basicAuthCredentials() != null
                         ? ctx.basicAuthCredentials().getUsername() + ":" + ctx.basicAuthCredentials().getPassword()
                         : null;
-                String expected = authConfig.getUsername() + ":" + authConfig.getPassword();
-                if (!expected.equals(auth)) {
+                if (!expectedAuth.equals(auth)) {
                     ctx.status(401)
                             .header("WWW-Authenticate", "Basic realm=\"EventLens\"")
                             .json(Map.of("error", "Unauthorized"));
                     ctx.skipRemainingHandlers();
                 }
             });
-            log.info("Basic auth ENABLED for /api/*");
+            app.before("/ws/*", ctx -> {
+                String auth = ctx.basicAuthCredentials() != null
+                        ? ctx.basicAuthCredentials().getUsername() + ":" + ctx.basicAuthCredentials().getPassword()
+                        : null;
+                if (!expectedAuth.equals(auth)) {
+                    ctx.status(401)
+                            .header("WWW-Authenticate", "Basic realm=\"EventLens\"")
+                            .json(Map.of("error", "Unauthorized"));
+                    ctx.skipRemainingHandlers();
+                }
+            });
+            log.info("Basic auth ENABLED for /api/* and /ws/*");
         }
 
         // ── Routes ─────────────────────────────────────────────────────────

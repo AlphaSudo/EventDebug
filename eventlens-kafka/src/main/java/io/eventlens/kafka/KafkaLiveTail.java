@@ -66,9 +66,13 @@ public class KafkaLiveTail implements AutoCloseable {
     }
 
     private void pollLoop() {
-        try {
-            while (running) {
+        int backoffMs = 1_000;
+        final int maxBackoffMs = 30_000;
+
+        while (running) {
+            try {
                 ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
+                backoffMs = 1_000; // reset on successful poll
                 for (ConsumerRecord<String, String> record : records) {
                     try {
                         StoredEvent event = KafkaEventMapper.fromRecord(record);
@@ -78,13 +82,24 @@ public class KafkaLiveTail implements AutoCloseable {
                                 record.offset(), e.getMessage());
                     }
                 }
+            } catch (org.apache.kafka.common.errors.WakeupException e) {
+                break;
+            } catch (Exception e) {
+                log.error("Kafka poll loop failed, reconnecting in {}ms: {}", backoffMs, e.getMessage());
+                try {
+                    Thread.sleep(backoffMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                backoffMs = Math.min(backoffMs * 2, maxBackoffMs);
             }
-        } catch (org.apache.kafka.common.errors.WakeupException e) {
-            // Expected on close()
-        } catch (Exception e) {
-            log.error("Kafka poll loop failed", e);
-        } finally {
+        }
+
+        try {
             consumer.close();
+        } catch (Exception e) {
+            log.debug("Consumer close: {}", e.getMessage());
         }
     }
 }

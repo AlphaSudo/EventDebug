@@ -71,7 +71,7 @@ class AnomalyDetectorTest {
     }
 
     @Test
-    void defaultNegativeBalanceRuleEmitsHighSeverityAnomaly() {
+    void configRuleDetectsNegativeBalance() {
         var events = List.of(
                 event(1, "AccountCreated", "{\"balance\":0,\"_version\":1}"),
                 event(2, "MoneyWithdrawn", "{\"balance\":-10,\"_version\":2}")
@@ -79,7 +79,9 @@ class AnomalyDetectorTest {
 
         var reader = inMemory(events);
         var replayEngine = new ReplayEngine(reader, new io.eventlens.core.aggregator.ReducerRegistry());
-        var detector = new AnomalyDetector(reader, replayEngine);
+        var config = new io.eventlens.core.EventLensConfig.AnomalyConfig();
+        config.setRules(List.of(ruleConfig("NEGATIVE_BALANCE", "balance < 0", "HIGH")));
+        var detector = new AnomalyDetector(reader, replayEngine, config);
 
         List<AnomalyReport> anomalies = detector.scan("ACC-001");
 
@@ -88,6 +90,15 @@ class AnomalyDetectorTest {
         assertThat(a.code()).isEqualTo("NEGATIVE_BALANCE");
         assertThat(a.severity()).isEqualTo(AnomalyReport.Severity.HIGH);
         assertThat(a.atSequence()).isEqualTo(2);
+    }
+
+    private static io.eventlens.core.EventLensConfig.AnomalyRuleConfig ruleConfig(
+            String code, String condition, String severity) {
+        var rc = new io.eventlens.core.EventLensConfig.AnomalyRuleConfig();
+        rc.setCode(code);
+        rc.setCondition(condition);
+        rc.setSeverity(severity);
+        return rc;
     }
 
     @Test
@@ -122,7 +133,9 @@ class AnomalyDetectorTest {
 
         var reader = inMemory(events);
         var replayEngine = new ReplayEngine(reader, new io.eventlens.core.aggregator.ReducerRegistry());
-        var detector = new AnomalyDetector(reader, replayEngine);
+        var config = new io.eventlens.core.EventLensConfig.AnomalyConfig();
+        config.setRules(List.of(ruleConfig("NEGATIVE_BALANCE", "balance < 0", "HIGH")));
+        var detector = new AnomalyDetector(reader, replayEngine, config);
 
         List<AnomalyReport> anomalies = detector.scanRecent(10);
 

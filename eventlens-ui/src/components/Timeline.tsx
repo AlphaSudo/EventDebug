@@ -1,4 +1,5 @@
 import { useTimeline } from '../hooks/useTimeline';
+import { parseEventTimestamp } from '../utils/time';
 
 interface Props {
     aggregateId: string;
@@ -6,10 +7,13 @@ interface Props {
     onSelectEvent: (seq: number) => void;
 }
 
+// Generic event type dot styling — any domain
 function dotClass(eventType: string): string {
     const t = eventType.toLowerCase();
-    if (t.includes('created') || t.includes('opened')) return 'created';
-    if (t.includes('deleted') || t.includes('closed')) return 'deleted';
+    if (t.includes('created') || t.includes('opened') || t.includes('placed') || t.includes('submitted')) return 'created';
+    if (t.includes('deleted') || t.includes('closed') || t.includes('cancelled') || t.includes('rejected')) return 'deleted';
+    if (t.includes('completed') || t.includes('resolved') || t.includes('accepted') || t.includes('approved') || t.includes('assigned')) return 'completed';
+    if (t.includes('failed') || t.includes('error')) return 'failed';
     if (t.includes('transfer')) return 'transfer';
     return 'default';
 }
@@ -55,7 +59,7 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
                         <div
                             className={`timeline-dot ${dotClass(t.event.eventType)} ${selectedSequence === t.event.sequenceNumber ? 'active' : ''}`}
                             onClick={() => onSelectEvent(t.event.sequenceNumber)}
-                            title={`#${t.event.sequenceNumber}: ${t.event.eventType}\n${new Date(t.event.timestamp).toLocaleString()}`}
+                            title={`#${t.event.sequenceNumber}: ${t.event.eventType}\n${parseEventTimestamp(t.event.timestamp).toLocaleString()}`}
                             role="button"
                             tabIndex={0}
                             onKeyDown={e => e.key === 'Enter' && onSelectEvent(t.event.sequenceNumber)}
