@@ -52,7 +52,7 @@ class ReplayEngineTest {
     }
 
     private StoredEvent event(long seq, String type, String payload) {
-        return new StoredEvent(UUID.randomUUID(), "ACC-001", "BankAccount", seq,
+        return new StoredEvent(UUID.randomUUID().toString(), "ACC-001", "BankAccount", seq,
                 type, payload, "{}", Instant.now(), seq);
     }
 

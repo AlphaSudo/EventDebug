@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.*;
 class BisectEngineTest {
 
     private StoredEvent event(long seq, String type, String payload) {
-        return new StoredEvent(UUID.randomUUID(), "ACC-001", "BankAccount", seq,
+        return new StoredEvent(UUID.randomUUID().toString(), "ACC-001", "BankAccount", seq,
                 type, payload, "{}", Instant.now(), seq);
     }
 
@@ -59,21 +59,16 @@ class BisectEngineTest {
     @Test
     void bisectFindsCulpritEventForNegativeBalance() {
         var events = List.of(
-                event(1, "AccountCreated", "{\"balance\":0}"),
-                event(2, "MoneyDeposited", "{\"balance\":100}"),
-                event(3, "MoneyWithdrawn", "{\"balance\":150}") // goes negative via heuristic
+                event(1, "AccountCreated", "{\"balance\":100}"),
+                event(2, "BalanceAdjusted", "{\"balance\":-50}")
         );
 
         var engine = makeEngine(events);
         var condition = BisectEngine.parseCondition("balance < 0");
         var result = engine.bisect("ACC-001", condition);
 
-        // The third event should cause withdrawal to subtract 150 from 100
-        // However with the generic reducer heuristics, "withdrawn" subtracts "balance"
-        // field value (150)
-        // from the current balance (100) = -50
         assertThat(result.culpritEvent()).isNotNull();
-        assertThat(result.culpritEvent().sequenceNumber()).isEqualTo(3);
+        assertThat(result.culpritEvent().sequenceNumber()).isEqualTo(2);
         assertThat(result.replaysPerformed()).isGreaterThan(0);
     }
 

@@ -15,7 +15,7 @@ class AnomalyDetectorTest {
 
     private StoredEvent event(long seq, String type, String payload) {
         return new StoredEvent(
-                UUID.randomUUID(),
+                UUID.randomUUID().toString(),
                 "ACC-001",
                 "BankAccount",
                 seq,
@@ -30,12 +30,16 @@ class AnomalyDetectorTest {
         return new EventStoreReader() {
             @Override
             public List<StoredEvent> getEvents(String aggregateId) {
-                return events;
+                return events.stream()
+                        .filter(e -> aggregateId.equals(e.aggregateId()))
+                        .toList();
             }
 
             @Override
             public List<StoredEvent> getEventsUpTo(String aggregateId, long maxSequence) {
-                return events.stream().filter(e -> e.sequenceNumber() <= maxSequence).toList();
+                return events.stream()
+                        .filter(e -> aggregateId.equals(e.aggregateId()) && e.sequenceNumber() <= maxSequence)
+                        .toList();
             }
 
             @Override
@@ -45,7 +49,7 @@ class AnomalyDetectorTest {
 
             @Override
             public List<StoredEvent> getRecentEvents(int limit) {
-                return events;
+                return events.stream().limit(limit).toList();
             }
 
             @Override
@@ -127,7 +131,7 @@ class AnomalyDetectorTest {
     void scanRecentGroupsByAggregate() {
         var events = List.of(
                 event(1, "AccountCreated", "{\"balance\":-5}"),
-                new StoredEvent(UUID.randomUUID(), "ACC-002", "BankAccount", 1,
+                new StoredEvent(UUID.randomUUID().toString(), "ACC-002", "BankAccount", 1,
                         "AccountCreated", "{\"balance\":-1}", "{}", Instant.now(), 1)
         );
 

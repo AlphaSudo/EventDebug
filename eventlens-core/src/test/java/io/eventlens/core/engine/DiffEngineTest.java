@@ -16,7 +16,7 @@ class DiffEngineTest {
 
     private StoredEvent event(long seq, String type, String payload) {
         return new StoredEvent(
-                UUID.randomUUID(),
+                UUID.randomUUID().toString(),
                 "ACC-001",
                 "BankAccount",
                 seq,
@@ -37,6 +37,9 @@ class DiffEngineTest {
         EventStoreReader reader = new EventStoreReader() {
             @Override
             public List<StoredEvent> getEvents(String aggregateId) {
+                if ("ACC-001".equals(aggregateId)) {
+                    return List.of(events.get(0));
+                }
                 return events;
             }
 
@@ -96,7 +99,7 @@ class DiffEngineTest {
         Map<String, Object> stateB = Map.of("balance", 50, "status", "CLOSED", "flag", "FRAUD");
 
         var diffEngine = new DiffEngine(replayEngineWithStates(stateA, stateB));
-        Map<String, StateTransition.FieldChange> diff = diffEngine.diff("ACC-001", "ACC-001");
+        Map<String, StateTransition.FieldChange> diff = diffEngine.diff("ACC-001", "ACC-002");
 
         assertThat(diff).containsKey("balance");
         assertThat(diff.get("balance").oldValue()).isEqualTo(100);

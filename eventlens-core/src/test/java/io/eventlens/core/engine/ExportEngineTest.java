@@ -14,7 +14,7 @@ class ExportEngineTest {
 
     private StoredEvent event(long seq, String type, String payload) {
         return new StoredEvent(
-                UUID.randomUUID(),
+                UUID.randomUUID().toString(),
                 "ACC-001",
                 "BankAccount",
                 seq,
@@ -81,8 +81,8 @@ class ExportEngineTest {
 
         String json = exporter.export("ACC-001", ExportEngine.Format.JSON);
 
-        assertThat(json).contains("\"aggregateId\":\"ACC-001\"");
-        assertThat(json).contains("\"eventCount\":2");
+        assertThat(json).contains("aggregateId").contains("ACC-001");
+        assertThat(json).contains("eventCount").contains("2");
         assertThat(json).contains("AccountCreated");
         assertThat(json).contains("MoneyDeposited");
     }

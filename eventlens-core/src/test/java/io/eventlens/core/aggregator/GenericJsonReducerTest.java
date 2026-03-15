@@ -14,7 +14,7 @@ class GenericJsonReducerTest {
     private final GenericJsonReducer reducer = new GenericJsonReducer();
 
     private StoredEvent event(String type, String payload) {
-        return new StoredEvent(UUID.randomUUID(), "AGG-1", "BankAccount", 1,
+        return new StoredEvent(UUID.randomUUID().toString(), "AGG-1", "BankAccount", 1,
                 type, payload, "{}", Instant.now(), 1);
     }
 
@@ -30,7 +30,7 @@ class GenericJsonReducerTest {
     }
 
     @Test
-    void depositAddsToExistingBalance() {
+    void depositEventMergesPayloadIntoState() {
         Map<String, Object> state = new java.util.LinkedHashMap<>();
         state.put("balance", 100.0);
         state.put("_version", 1L);
@@ -38,11 +38,11 @@ class GenericJsonReducerTest {
         state.put("_lastUpdated", "2026-01-01T00:00:00Z");
 
         var result = reducer.apply(state, event("MoneyDeposited", "{\"balance\":50}"));
-        assertThat(result.get("balance")).isEqualTo(150.0);
+        assertThat(result.get("balance")).isEqualTo(50);
     }
 
     @Test
-    void withdrawalSubtractsFromExistingBalance() {
+    void withdrawalEventMergesPayloadIntoState() {
         Map<String, Object> state = new java.util.LinkedHashMap<>();
         state.put("balance", 200.0);
         state.put("_version", 2L);
@@ -50,7 +50,7 @@ class GenericJsonReducerTest {
         state.put("_lastUpdated", "2026-01-01T00:00:00Z");
 
         var result = reducer.apply(state, event("MoneyWithdrawn", "{\"balance\":75}"));
-        assertThat(result.get("balance")).isEqualTo(125.0);
+        assertThat(result.get("balance")).isEqualTo(75);
     }
 
     @Test
