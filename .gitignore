@@ -1,26 +1,44 @@
-# Compiled output
+# =============================================================
+# EventLens — .gitignore
+# =============================================================
+
+# Compiled class files and IDE bin/ directories
+**/bin/
+
+# Gradle build outputs
 **/build/
 **/dist/
 **/.gradle/
+
+# JARs (except Gradle wrapper)
 **/*.jar
 !gradle/wrapper/gradle-wrapper.jar
 
-# Node
+# Node / frontend
 eventlens-ui/node_modules/
 eventlens-ui/.vite/
+
+# TypeScript incremental build caches
+*.tsbuildinfo
 
 # IDE
 .idea/
 *.iml
 .vscode/
 .DS_Store
+Thumbs.db
 
-# Logs
+# Runtime logs and debug dumps
 logs/
 *.log
+*.txt
 
-# Config with secrets (commit eventlens.yaml.example instead)
-# eventlens.yaml — uncomment to exclude if it has credentials
+# Config with real credentials — commit *.yaml.example instead
+eventlens.yaml
 
 # Test runtime
 .testcontainers.properties
+
+# Local AI agent rules / dev tooling config
+.agents/
+.gemini/

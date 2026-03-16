@@ -1,5 +1,6 @@
-# EventLens Configuration
-# Copy this file to the working directory, ~/.eventlens/config.yaml, or /etc/eventlens/config.yaml
+# EventLens Configuration — Example
+# Copy this file to eventlens.yaml and fill in your real values.
+# eventlens.yaml is gitignored — never commit real credentials.
 
 server:
   port: 9090
@@ -13,17 +14,17 @@ server:
   auth:
     enabled: false
     username: admin
-    password: changeme
+    password: CHANGE_ME   # Replace with a strong password
 
 datasource:
-  url: jdbc:postgresql://postgres:5432/eventlens_dev
-  username: postgres
-  password: secret
+  url: jdbc:postgresql://localhost:5432/your_db_name
+  username: your_pg_user
+  password: CHANGE_ME   # Replace with your real DB password
   table:                       # Optional: auto-detected if omitted
 
 kafka:                         # Optional section — remove to disable Kafka
-  bootstrap-servers: kafka:9092
-  topic: domain-events
+  bootstrap-servers: localhost:9092
+  topic: your-events-topic
 
 replay:
   default-reducer: generic     # "generic" | classpath
