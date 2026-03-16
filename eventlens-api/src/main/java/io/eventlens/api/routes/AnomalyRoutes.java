@@ -6,6 +6,8 @@ import io.javalin.http.Context;
 /** Anomaly detection endpoints. */
 public class AnomalyRoutes {
 
+    private static final int MAX_SCAN_LIMIT = 500;
+
     private final AnomalyDetector anomalyDetector;
 
     public AnomalyRoutes(AnomalyDetector anomalyDetector) {
@@ -19,7 +21,7 @@ public class AnomalyRoutes {
 
     /** GET /api/anomalies/recent?limit=100 */
     public void scanRecent(Context ctx) {
-        int limit = ctx.queryParamAsClass("limit", Integer.class).getOrDefault(100);
+        int limit = Math.min(ctx.queryParamAsClass("limit", Integer.class).getOrDefault(100), MAX_SCAN_LIMIT);
         ctx.json(anomalyDetector.scanRecent(limit));
     }
 }

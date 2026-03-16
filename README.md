@@ -190,7 +190,7 @@ services:
   #   ...
 
   eventlens:
-    image: alphasudo2/eventlens-app:fixed
+    image: alphasudo2/eventlens-app:latest
     restart: on-failure
     environment:
       EVENTLENS_CONFIG: /app/eventlens.yaml
@@ -199,8 +199,16 @@ services:
     ports:
       - "9090:9090"
     depends_on:
-      - postgres
-      # - kafka      # Uncomment if you use Kafka Live Stream
+      postgres:
+        condition: service_healthy  # Wait until postgres is ready
+      # kafka:
+      #  condition: service_healthy  # Uncomment if you use Kafka Live Stream
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9090/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 ```
 
 Then start everything:
@@ -269,10 +277,18 @@ EventLens **does not** reconcile or repair differences between the database and 
       password: changeme
   ```
 
+  > ⚠️ **HTTPS required for Basic Auth in production.**  
+  > Basic Auth transmits credentials as Base64-encoded HTTP headers. Without TLS, they are readable in transit.
+  > Use a reverse proxy (nginx, Traefik, Caddy) with HTTPS in front of EventLens when `auth.enabled: true`.
+
   Use stronger credentials and secrets management in real deployments.
 
 - **CORS / Frontend access**  
   Restrict `server.allowed-origins` in production to the domains that should reach your dashboard.
+
+- **API request limits**  
+  All list endpoints automatically cap results at **1,000 records per request** on the server side
+  (timeline, search, recent events, anomaly scan). Use `limit` + `offset` pagination for larger datasets.
 
 - **Config locations**  
   For non‑Docker environments, place the YAML config in one of:
@@ -336,7 +352,7 @@ This document focuses on a **5-minute quick-start**, configuration via `eventlen
 From the project root:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 This starts:
@@ -345,7 +361,11 @@ This starts:
   - database: `eventlens_dev`
   - user: `postgres`
   - password: `secret`
-- `kafka` on `localhost:9092` (with a `zookeeper` sidecar)
+- `kafka` on `localhost:9092`
+
+> **Note:** The `app` service now waits for both `postgres` and `kafka` to pass their health checks
+> before starting (using `depends_on: condition: service_healthy`). This means the first start may
+> take ~15–30 seconds while Kafka initialises.
 
 If `seed.sql` is present in the repo, it is applied automatically to the `eventlens_dev` database at container start.
 
@@ -625,6 +645,16 @@ In containerized environments, direct logs to stdout/stderr and collect them via
 
 - Configure a **read-only** Postgres user in your environment.
 - Add or adjust indexes to match your event table shape.
-- Enable basic auth and tighten CORS in `eventlens.yaml` for production deployments.
+- Enable basic auth **behind an HTTPS reverse proxy** in `eventlens.yaml` for production deployments.
 - Build and run the Docker image alongside your own PostgreSQL/Kafka infrastructure, or reuse the provided `docker-compose.yml` for local debugging.
 
+---
+
+## Project Info
+
+| File | Description |
+|------|-------------|
+| [LICENSE](LICENSE) | MIT License |
+| [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Build, test, and PR guidelines |
+| [eventlens.yaml.example](eventlens.yaml.example) | Annotated config template |

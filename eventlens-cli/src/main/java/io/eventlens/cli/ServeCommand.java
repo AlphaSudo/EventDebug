@@ -8,11 +8,15 @@ import io.eventlens.core.aggregator.*;
 import io.eventlens.core.engine.*;
 import io.eventlens.kafka.*;
 import io.eventlens.pg.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
 @Command(name = "serve", description = "Start the EventLens web server")
 public class ServeCommand implements Runnable {
+
+    private static final Logger log = LoggerFactory.getLogger(ServeCommand.class);
 
     @Option(names = "--port", description = "HTTP port (default: from config or 9090)")
     Integer port;
@@ -91,9 +95,9 @@ public class ServeCommand implements Runnable {
         if (brokers != null && topic != null) {
             try {
                 kafkaTail = new KafkaLiveTail(new KafkaConfig(brokers, topic));
-                System.out.println("📡 Kafka consumer: " + topic);
+                log.info("Kafka consumer connected to topic: {}", topic);
             } catch (Exception e) {
-                System.err.println("⚠ Kafka unavailable (" + e.getMessage() + ") — using PG polling fallback");
+                log.warn("Kafka unavailable ({}) — using PostgreSQL polling fallback", e.getMessage());
             }
         }
 

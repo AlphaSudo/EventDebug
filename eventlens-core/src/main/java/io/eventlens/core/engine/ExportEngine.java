@@ -2,6 +2,7 @@ package io.eventlens.core.engine;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import io.eventlens.core.JsonUtil;
 import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.spi.EventStoreReader;
 import org.slf4j.Logger;
@@ -25,9 +26,9 @@ public class ExportEngine {
     public ExportEngine(EventStoreReader reader, ReplayEngine replayEngine) {
         this.reader = reader;
         this.replayEngine = replayEngine;
-        this.mapper = new ObjectMapper()
-                .enable(SerializationFeature.INDENT_OUTPUT)
-                .findAndRegisterModules();
+        // Use the shared Jackson mapper (with modules registered once) instead of per-instance one.
+        this.mapper = JsonUtil.mapper().copy()
+                .enable(SerializationFeature.INDENT_OUTPUT);
     }
 
     public enum Format {

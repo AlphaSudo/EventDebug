@@ -8,6 +8,9 @@ import java.util.Map;
 /** Aggregate search, type listing, and recent event endpoints. */
 public class AggregateRoutes {
 
+    /** Hard cap on any client-supplied limit to prevent unbounded DB queries. */
+    private static final int MAX_LIMIT = 1_000;
+
     private final EventStoreReader reader;
 
     public AggregateRoutes(EventStoreReader reader) {
@@ -21,7 +24,7 @@ public class AggregateRoutes {
             ctx.status(400).json(Map.of("error", "Missing query parameter: q"));
             return;
         }
-        int limit = ctx.queryParamAsClass("limit", Integer.class).getOrDefault(20);
+        int limit = Math.min(ctx.queryParamAsClass("limit", Integer.class).getOrDefault(20), MAX_LIMIT);
         ctx.json(reader.searchAggregates(query, limit));
     }
 
@@ -32,7 +35,7 @@ public class AggregateRoutes {
 
     /** GET /api/events/recent?limit=50 */
     public void recentEvents(Context ctx) {
-        int limit = ctx.queryParamAsClass("limit", Integer.class).getOrDefault(50);
+        int limit = Math.min(ctx.queryParamAsClass("limit", Integer.class).getOrDefault(50), MAX_LIMIT);
         ctx.json(reader.getRecentEvents(limit));
     }
 }

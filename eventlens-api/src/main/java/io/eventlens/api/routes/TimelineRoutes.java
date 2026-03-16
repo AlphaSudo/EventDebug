@@ -6,6 +6,9 @@ import io.javalin.http.Context;
 /** Timeline, replay, and state transition endpoints. */
 public class TimelineRoutes {
 
+    /** Hard cap on any client-supplied limit to prevent unbounded DB queries. */
+    private static final int MAX_LIMIT = 1_000;
+
     private final ReplayEngine replayEngine;
 
     public TimelineRoutes(ReplayEngine replayEngine) {
@@ -14,8 +17,8 @@ public class TimelineRoutes {
 
     /** GET /api/aggregates/{id}/timeline */
     public void getTimeline(Context ctx) {
-        int limit = ctx.queryParamAsClass("limit", Integer.class).getOrDefault(500);
-        int offset = ctx.queryParamAsClass("offset", Integer.class).getOrDefault(0);
+        int limit = Math.min(ctx.queryParamAsClass("limit", Integer.class).getOrDefault(500), MAX_LIMIT);
+        int offset = Math.max(ctx.queryParamAsClass("offset", Integer.class).getOrDefault(0), 0);
         ctx.json(replayEngine.buildTimeline(ctx.pathParam("id"), limit, offset));
     }
 

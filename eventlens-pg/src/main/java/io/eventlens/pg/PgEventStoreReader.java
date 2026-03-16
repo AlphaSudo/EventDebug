@@ -23,7 +23,7 @@ import java.util.*;
  * config. Column name mappings can be explicitly set via
  * {@code datasource.columns} in eventlens.yaml.
  */
-public class PgEventStoreReader implements EventStoreReader {
+public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(PgEventStoreReader.class);
 

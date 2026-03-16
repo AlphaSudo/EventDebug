@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Set;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * WebSocket live tail — streams events to connected browser clients in
@@ -111,15 +112,15 @@ public class LiveTailWebSocket {
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofVirtual().name("eventlens-poll").factory());
 
-        final long[] lastPosition = { 0 };
+        final AtomicLong lastPosition = new AtomicLong(0);
 
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                var events = reader.getEventsAfter(lastPosition[0], 50);
+                var events = reader.getEventsAfter(lastPosition.get(), 50);
                 for (var event : events) {
                     broadcast(event);
-                    if (event.globalPosition() > lastPosition[0]) {
-                        lastPosition[0] = event.globalPosition();
+                    if (event.globalPosition() > lastPosition.get()) {
+                        lastPosition.set(event.globalPosition());
                     }
                 }
             } catch (Exception e) {

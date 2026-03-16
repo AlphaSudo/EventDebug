@@ -7,6 +7,8 @@ data:
   eventlens.yaml: |
     server:
       port: 9090
+      # WARNING: Replace "*" with your actual UI origin in production.
+      # Example: "https://eventlens.yourcompany.com"
       allowed-origins:
         - "*"
       auth:
@@ -43,14 +45,34 @@ spec:
     spec:
       containers:
         - name: eventlens
-          # Here we pull the exact image you just pushed!
+          # Pin to a specific image tag in production instead of "latest"
           image: docker.io/alphasudo2/eventlens-app:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9090
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
           volumeMounts:
             - name: config-volume
-              # Mount the ConfigMap as a file at /app/eventlens.yaml
               mountPath: /app/eventlens.yaml
               subPath: eventlens.yaml
       volumes:
@@ -65,7 +87,7 @@ metadata:
   namespace: default
 spec:
   # Exposes the UI outside of k3s on a random port (usually 30000-32767)
-  type: NodePort 
+  type: NodePort
   selector:
     app: eventlens
   ports:
