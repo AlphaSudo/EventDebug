@@ -42,7 +42,7 @@ function MiniWaveform() {
 function ConnectionStats({ isUp }: { isUp: boolean }) {
     const [uptime, setUptime] = useState(0);
     const [eventCount, setEventCount] = useState<number | null>(null);
-    const intervalRef = useRef<ReturnType<typeof setInterval>>();
+    const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
     useEffect(() => {
         const start = Date.now();
