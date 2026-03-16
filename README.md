@@ -1,5 +1,8 @@
 ## EventLens – Drop‑in Event Store Debugger
 
+[![Build Status](https://github.com/AlphaSudo/EventDebug/actions/workflows/build.yml/badge.svg)](https://github.com/AlphaSudo/EventDebug/actions/workflows/build.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/AlphaSudo/EventDebug?sort=semver)](https://github.com/AlphaSudo/EventDebug/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 EventLens is a **read‑only dashboard** for event‑sourced systems. It connects to your **PostgreSQL event store** (and optionally **Kafka**) and gives you:
 
 - **Timeline** of events for any aggregate
