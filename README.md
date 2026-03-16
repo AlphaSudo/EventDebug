@@ -1,3 +1,313 @@
+## EventLens – Drop‑in Event Store Debugger
+
+EventLens is a **read‑only dashboard** for event‑sourced systems. It connects to your **PostgreSQL event store** (and optionally **Kafka**) and gives you:
+
+- **Timeline** of events for any aggregate
+- **Search** across event types and IDs
+- **Anomalies** based on simple rules
+- **Export** of raw events for debugging / analytics
+- **Live Event Stream** from Kafka (optional)
+
+It never mutates data – it only **reads** from your database and (optionally) a Kafka topic.
+
+---
+
+## 1. Quick Start – TL;DR
+
+1. **Expose your events via a Postgres view** called `eventlens_events` with the required columns.
+2. **Create an EventLens config** (you already have `eventlens.yaml` in this repo – use it as a template).
+3. **Run the EventLens container** (typically via `docker compose`), mounting the config file.
+4. **Open the UI** at `http://localhost:9090` and start exploring your events.
+
+The rest of this README explains each step in detail.
+
+---
+
+## 2. Event Store Requirements
+
+### 2.1 Required PostgreSQL view
+
+EventLens expects a **read‑only view** (or table) with the following conceptual columns:
+
+- **`event_id`** – globally unique ID, monotonically increasing per stream (often the primary key).
+- **`aggregate_id`** – string ID of the aggregate / entity.
+- **`aggregate_type`** – domain type (e.g. `ORDER`, `USER`).
+- **`sequence_number`** – version within the aggregate’s stream (1, 2, 3, …).
+- **`event_type`** – logical event type (e.g. `ORDER_PLACED`).
+- **`payload`** – JSON body of the domain event.
+- **`metadata`** – JSON with headers, correlation IDs, etc. (`{}` is fine).
+- **`timestamp`** – event creation time (`timestamptz` or epoch seconds).
+- **`global_position`** – total ordering across all events (often the same as `event_id`).
+
+If your existing event table has a different shape, create a **view** that maps it to this schema. Example:
+
+```sql
+CREATE OR REPLACE VIEW eventlens_events AS
+SELECT
+    e.id                               AS event_id,
+    e.aggregate_id::text               AS aggregate_id,
+    e.aggregate_type                   AS aggregate_type,
+    e.version                          AS sequence_number,
+    e.event_type                       AS event_type,
+    e.json_data                        AS payload,
+    '{}'::jsonb                        AS metadata,
+    COALESCE(
+        (e.json_data::jsonb->>'createdDate')::timestamptz,
+        e.created_at,
+        CURRENT_TIMESTAMP
+    )                                  AS timestamp,
+    e.id                               AS global_position
+FROM your_event_table e;
+```
+
+**Key rules:**
+
+- Keep it **read‑only** (view only, no triggers).
+- Do **not** change your existing write model – only project into this view.
+
+---
+
+## 3. EventLens Configuration
+
+EventLens loads configuration from **one YAML file**. In this project you already have an example file:
+
+- `eventlens.yaml` – sample config for local / Docker use
+
+You can place your active config in one of these locations:
+
+- Working directory (easiest for Docker): `./eventlens.yaml`
+- User config: `~/.eventlens/config.yaml`
+- System config: `/etc/eventlens/config.yaml`
+
+Below is a minimal configuration you can adapt (Postgres only, no Kafka):
+
+```yaml
+# EventLens Configuration
+server:
+  port: 9090
+  allowed-origins:
+    - "http://localhost:9090"
+  auth:
+    enabled: false        # Turn on + set username/password in shared environments
+
+datasource:
+  url: jdbc:postgresql://postgres:5432/your_db_name
+  username: your_user
+  password: your_password
+  table: eventlens_events  # View created in section 2
+  columns:
+    event-id: event_id
+    aggregate-id: aggregate_id
+    aggregate-type: aggregate_type
+    sequence: sequence_number
+    event-type: event_type
+    payload: payload
+    timestamp: timestamp
+    global-position: global_position
+```
+
+### 3.1 Optional Kafka Live Event Stream
+
+If you have Kafka and want live updates, add:
+
+```yaml
+kafka:
+  bootstrap-servers: your-kafka:9092
+  topic: your-events-topic
+```
+
+Recommended **Kafka message JSON shape**:
+
+```json
+{
+  "event_id": 123,
+  "aggregate_id": "1ffe55a0-08fa-4109-bec9-55c35dd879a4",
+  "aggregate_type": "ORDER",
+  "sequence_number": 3,
+  "event_type": "ORDER_COMPLETED",
+  "payload": {
+    "aggregateId": "1ffe55a0-08fa-4109-bec9-55c35dd879a4",
+    "version": 3,
+    "createdDate": "2026-03-14T14:50:50.115861751Z",
+    "eventType": "ORDER_COMPLETED"
+  },
+  "metadata": {},
+  "timestamp": 1773499850.115862,
+  "global_position": 123
+}
+```
+
+Typical pattern:
+
+- After writing to the Postgres event store, **publish** a Kafka message built from the same event row.
+- Make the Kafka JSON match the `eventlens_events` view fields.
+
+### 3.2 Replay and Anomalies (optional)
+
+The config can also define **replay reducers** and **anomaly rules**. From `eventlens.yaml`:
+
+```yaml
+replay:
+  default-reducer: generic     # "generic" | classpath
+  reducers:
+    # BankAccount: com.myapp.reducers.BankAccountReducer
+
+anomaly:
+  scan-interval-seconds: 60
+  rules:
+    - code: NEGATIVE_BALANCE
+      condition: "balance < 0"
+      severity: HIGH
+    - code: LARGE_WITHDRAWAL
+      condition: "amount > 10000"
+      severity: MEDIUM
+```
+
+You can start with the defaults and add rules later as your domain model evolves.
+
+---
+
+## 4. Running EventLens with Docker Compose
+
+The simplest way to run EventLens in a project is via **Docker Compose**.
+
+Add a service like this to your existing `docker-compose.yml` (or create one if needed):
+
+```yaml
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: your_db_name
+      POSTGRES_USER: your_user
+      POSTGRES_PASSWORD: your_password
+    ports:
+      - "5432:5432"
+
+  # Optional: your Kafka stack here...
+  # kafka:
+  #   image: bitnami/kafka:latest
+  #   ...
+
+  eventlens:
+    image: alphasudo2/eventlens-app:fixed
+    restart: on-failure
+    environment:
+      EVENTLENS_CONFIG: /app/eventlens.yaml
+    volumes:
+      - ./eventlens.yaml:/app/eventlens.yaml:ro   # Mount your config read-only
+    ports:
+      - "9090:9090"
+    depends_on:
+      - postgres
+      # - kafka      # Uncomment if you use Kafka Live Stream
+```
+
+Then start everything:
+
+```bash
+docker compose up -d
+```
+
+Open the UI in your browser:
+
+```text
+http://localhost:9090
+```
+
+---
+
+## 5. Using EventLens in Your Project
+
+### 5.1 Timeline / Search / Anomalies / Export
+
+These features are backed by **Postgres** via the `eventlens_events` view and represent your **source of truth**:
+
+- **Timeline** – inspect events for a single aggregate over time.
+- **Search** – find events by type, ID, or filters.
+- **Anomalies** – see events that match anomaly rules from the config.
+- **Export** – download raw events for offline analysis.
+
+To verify everything is wired correctly:
+
+1. Go to `http://localhost:9090`.
+2. Use the search or timeline view for a known `aggregate_id`.
+3. You should see the same events that exist in your Postgres event store.
+
+### 5.2 Live Event Stream (Kafka)
+
+When `kafka` is configured and reachable:
+
+1. Trigger a new event in your application (e.g. create an order, transfer money, etc.).
+2. Open the **Live Event Stream** tab.
+3. A new row should appear for each new event published to the configured Kafka topic.
+
+You can double‑check Kafka messages manually, for example with `kafka-console-consumer`, and confirm their JSON matches the schema in section 3.1.
+
+### 5.3 Consistency model
+
+- Postgres (via `eventlens_events`) is the **system of record**.
+- Kafka is used only for **live streaming** into the UI.
+- Your application is responsible for the **dual‑write**:
+  - Write to Postgres.
+  - Then publish a corresponding Kafka message.
+
+EventLens **does not** reconcile or repair differences between the database and Kafka.
+
+---
+
+## 6. Security and Deployment Notes
+
+- **Authentication**  
+  In the `server.auth` block you can enable basic auth:
+
+  ```yaml
+  server:
+    auth:
+      enabled: true
+      username: admin
+      password: changeme
+  ```
+
+  Use stronger credentials and secrets management in real deployments.
+
+- **CORS / Frontend access**  
+  Restrict `server.allowed-origins` in production to the domains that should reach your dashboard.
+
+- **Config locations**  
+  For non‑Docker environments, place the YAML config in one of:
+  - `./eventlens.yaml`
+  - `~/.eventlens/config.yaml`
+  - `/etc/eventlens/config.yaml`
+
+---
+
+## 7. Integrating into a New Project – Checklist
+
+Use this checklist when adding EventLens to any event‑sourced system:
+
+1. **Database**
+   - [ ] Identify your existing event table(s).
+   - [ ] Create a Postgres view named `eventlens_events` with the required columns.
+2. **Config**
+   - [ ] Copy `eventlens.yaml` into your project and adjust:
+     - [ ] `datasource.url`, `username`, `password`.
+     - [ ] `datasource.table` (usually `eventlens_events`).
+     - [ ] `columns` mappings, if your column names differ.
+   - [ ] (Optional) Add `kafka.bootstrap-servers` and `kafka.topic`.
+   - [ ] (Optional) Configure `anomaly` rules and `replay` reducers.
+3. **Runtime**
+   - [ ] Add the `eventlens` service to `docker-compose.yml` (or equivalent).
+   - [ ] Mount the config file into `/app/eventlens.yaml`.
+   - [ ] Expose port `9090`.
+4. **Verification**
+   - [ ] Start containers: `docker compose up -d`.
+   - [ ] Open `http://localhost:9090`.
+   - [ ] Confirm timeline/search show events from your Postgres event store.
+   - [ ] (If using Kafka) Confirm Live Event Stream updates when new events occur.
+
+Once this checklist passes, your team has a **self‑service event debugger** they can rely on for day‑to‑day diagnostics, investigations, and domain exploration.
+
 # EventLens — Event Store Visual Debugger & Time Machine
 
 EventLens is a **read-only, zero-intrusion visual debugger** for PostgreSQL event stores (with optional Kafka live tail). It lets you:
