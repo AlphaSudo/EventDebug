@@ -14,6 +14,7 @@ EventLens is a **read‑only dashboard** for event‑sourced systems. It connect
 It never mutates data – it only **reads** from your database and (optionally) a Kafka topic.
 
 ---
+<img width="1920" height="918" alt="Screenshot (192)" src="https://github.com/user-attachments/assets/b8bba512-e96f-45ea-b048-209e066ef77f" />
 
 ## 1. Quick Start – TL;DR
 
