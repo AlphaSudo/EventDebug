@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.List;
@@ -24,10 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class KafkaLiveTailTest {
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer(
-            DockerImageName.parse("confluentinc/cp-kafka:7.6.1"))
-            .withEnv("KAFKA_LISTENERS", "PLAINTEXT://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094")
-            .withStartupTimeout(Duration.ofMinutes(2));
+    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.0");
 
     private static KafkaProducer<String, String> producer;
 
