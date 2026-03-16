@@ -13,7 +13,7 @@ dependencies {
     implementation(project(":eventlens-kafka"))
     implementation(project(":eventlens-api"))
     implementation(project(":eventlens-cli"))
-    implementation("ch.qos.logback:logback-classic:1.5.6")
+    implementation("ch.qos.logback:logback-classic:1.5.32")
 }
 
 // Build the React UI before processing resources

@@ -4,5 +4,5 @@ dependencies {
     implementation(project(":eventlens-kafka"))
     implementation("io.javalin:javalin:6.3.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
-    implementation("ch.qos.logback:logback-classic:1.5.6")
+    implementation("ch.qos.logback:logback-classic:1.5.32")
 }
