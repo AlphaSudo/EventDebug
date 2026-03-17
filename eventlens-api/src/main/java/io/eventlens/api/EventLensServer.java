@@ -2,6 +2,7 @@ package io.eventlens.api;
 
 import io.eventlens.api.routes.*;
 import io.eventlens.core.EventLensConfig;
+import io.eventlens.core.RateLimiter;
 import io.eventlens.core.engine.*;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.Javalin;
@@ -41,22 +42,16 @@ public class EventLensServer {
         this.app = Javalin.create(cfg -> {
             cfg.staticFiles.add("/web"); // Embedded React build
             cfg.jsonMapper(new JavalinJackson());
-            cfg.bundledPlugins.enableCors(cors -> cors.addRule(rule -> {
-                var origins = config.getServer().getAllowedOrigins();
-                if (origins == null || origins.isEmpty()) {
-                    // No origins configured: default to localhost only (same as built-in default)
-                    rule.allowHost("http://localhost:" + config.getServer().getPort());
-                } else if (origins.contains("*")) {
-                    // Fix 5: "*" in the list → anyHost(), instead of crashing with
-                    // IllegalArgumentException("* is not a valid host").
-                    rule.anyHost();
-                } else {
-                    origins.forEach(rule::allowHost);
-                }
-            }));
         });
 
         // ── Security middleware ────────────────────────────────────────────
+        var rateLimitCfg = config.getServer().getSecurity() != null
+                ? config.getServer().getSecurity().getRateLimit()
+                : null;
+        final RateLimiter rateLimiter = (rateLimitCfg != null && rateLimitCfg.isEnabled())
+                ? new RateLimiter(rateLimitCfg)
+                : null;
+
         app.before(ctx -> {
             // Prevent clickjacking
             ctx.header("X-Frame-Options", "DENY");
@@ -96,6 +91,52 @@ public class EventLensServer {
             ctx.header("X-Request-Id", requestId);
             ctx.attribute("requestId", requestId);
         });
+
+        // Strict CORS: allowlist only; GET + OPTIONS (read-only)
+        app.before(ctx -> {
+            String origin = ctx.header("Origin");
+            if (origin == null) return;
+
+            var allowed = config.getServer().getAllowedOrigins();
+            if (allowed == null || allowed.isEmpty() || !allowed.contains(origin)) {
+                ctx.status(403).result("Origin not allowed");
+                ctx.skipRemainingHandlers();
+                return;
+            }
+
+            ctx.header("Access-Control-Allow-Origin", origin);
+            ctx.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+            ctx.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-Id");
+            ctx.header("Access-Control-Max-Age", String.valueOf(config.getServer().getCorsMaxAgeSeconds()));
+            ctx.header("Access-Control-Allow-Credentials", "true");
+            ctx.header("Vary", "Origin");
+
+            if ("OPTIONS".equalsIgnoreCase(ctx.method().name())) {
+                ctx.status(204);
+                ctx.skipRemainingHandlers();
+            }
+        });
+
+        if (rateLimiter != null) {
+            app.before("/api/*", ctx -> {
+                String clientIp = extractClientIp(ctx);
+                var result = rateLimiter.tryConsume(clientIp);
+
+                ctx.header("X-RateLimit-Limit", String.valueOf(result.limitPerMinute()));
+                ctx.header("X-RateLimit-Remaining", String.valueOf(result.remainingTokens()));
+                if (!result.allowed()) {
+                    ctx.status(429)
+                            .header("Retry-After", String.valueOf(result.retryAfterSeconds()))
+                            .header("X-RateLimit-Reset", String.valueOf(result.resetEpochSeconds()))
+                            .json(Map.of(
+                                    "error", "rate_limit_exceeded",
+                                    "message", "Too many requests. Retry after %d seconds.".formatted(result.retryAfterSeconds()),
+                                    "retryAfterSeconds", result.retryAfterSeconds()
+                            ));
+                    ctx.skipRemainingHandlers();
+                }
+            });
+        }
 
         var authConfig = config.getServer().getAuth();
         if (authConfig.isEnabled()) {
@@ -182,5 +223,17 @@ public class EventLensServer {
 
     public Javalin getApp() {
         return app;
+    }
+
+    private static String extractClientIp(io.javalin.http.Context ctx) {
+        String xff = ctx.header("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) {
+            int comma = xff.indexOf(',');
+            String first = (comma >= 0 ? xff.substring(0, comma) : xff).trim();
+            if (!first.isBlank()) return first;
+        }
+        String xri = ctx.header("X-Real-IP");
+        if (xri != null && !xri.isBlank()) return xri.trim();
+        return ctx.ip();
     }
 }

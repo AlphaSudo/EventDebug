@@ -68,6 +68,27 @@ public final class ConfigValidator {
                             "Using '*' with auth enabled allows credential theft from any origin"));
                 }
             }
+
+            if (server.getCorsMaxAgeSeconds() < 0 || server.getCorsMaxAgeSeconds() > 86_400) {
+                issues.add(error("server.cors-max-age-seconds", "Must be between 0 and 86400"));
+            }
+        }
+
+        // --- Rate limiting ---
+        if (server != null && server.getSecurity() != null && server.getSecurity().getRateLimit() != null) {
+            var rl = server.getSecurity().getRateLimit();
+            if (rl.getRequestsPerMinute() < 1 || rl.getRequestsPerMinute() > 10_000) {
+                issues.add(error("server.security.rate-limit.requests-per-minute",
+                        "Must be between 1 and 10000"));
+            }
+            if (rl.getBurst() < 1 || rl.getBurst() > 10_000) {
+                issues.add(error("server.security.rate-limit.burst",
+                        "Must be between 1 and 10000"));
+            }
+            if (rl.getBurst() > rl.getRequestsPerMinute() * 10L) {
+                issues.add(warning("server.security.rate-limit.burst",
+                        "Burst is very high compared to requests-per-minute; consider lowering to reduce memory spikes"));
+            }
         }
 
         // --- Datasource ---

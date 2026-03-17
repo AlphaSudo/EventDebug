@@ -71,6 +71,8 @@ public class EventLensConfig {
         private int port = 9090;
         private List<String> allowedOrigins = List.of("http://localhost:5173", "http://localhost:9090");
         private AuthConfig auth = new AuthConfig();
+        private SecurityConfig security = new SecurityConfig();
+        private int corsMaxAgeSeconds = 600;
 
         public int getPort() {
             return port;
@@ -94,6 +96,22 @@ public class EventLensConfig {
 
         public void setAuth(AuthConfig auth) {
             this.auth = auth;
+        }
+
+        public SecurityConfig getSecurity() {
+            return security;
+        }
+
+        public void setSecurity(SecurityConfig security) {
+            this.security = security;
+        }
+
+        public int getCorsMaxAgeSeconds() {
+            return corsMaxAgeSeconds;
+        }
+
+        public void setCorsMaxAgeSeconds(int corsMaxAgeSeconds) {
+            this.corsMaxAgeSeconds = corsMaxAgeSeconds;
         }
     }
 
@@ -124,6 +142,48 @@ public class EventLensConfig {
 
         public void setPassword(String p) {
             this.password = p;
+        }
+    }
+
+    public static class SecurityConfig {
+        private RateLimitConfig rateLimit = new RateLimitConfig();
+
+        public RateLimitConfig getRateLimit() {
+            return rateLimit;
+        }
+
+        public void setRateLimit(RateLimitConfig rateLimit) {
+            this.rateLimit = rateLimit;
+        }
+    }
+
+    public static class RateLimitConfig {
+        private boolean enabled = false;
+        private int requestsPerMinute = 120;
+        private int burst = 20;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getRequestsPerMinute() {
+            return requestsPerMinute;
+        }
+
+        public void setRequestsPerMinute(int requestsPerMinute) {
+            this.requestsPerMinute = requestsPerMinute;
+        }
+
+        public int getBurst() {
+            return burst;
+        }
+
+        public void setBurst(int burst) {
+            this.burst = burst;
         }
     }
 
