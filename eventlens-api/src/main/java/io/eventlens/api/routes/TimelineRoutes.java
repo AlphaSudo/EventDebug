@@ -1,5 +1,6 @@
 package io.eventlens.api.routes;
 
+import io.eventlens.core.InputValidator;
 import io.eventlens.core.engine.ReplayEngine;
 import io.javalin.http.Context;
 
@@ -17,24 +18,30 @@ public class TimelineRoutes {
 
     /** GET /api/aggregates/{id}/timeline */
     public void getTimeline(Context ctx) {
-        int limit = Math.min(ctx.queryParamAsClass("limit", Integer.class).getOrDefault(500), MAX_LIMIT);
-        int offset = Math.max(ctx.queryParamAsClass("offset", Integer.class).getOrDefault(0), 0);
-        ctx.json(replayEngine.buildTimeline(ctx.pathParam("id"), limit, offset));
+        String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
+        int limit = Math.min(
+                InputValidator.validateLimit(ctx.queryParam("limit"), 500, MAX_LIMIT),
+                MAX_LIMIT);
+        int offset = InputValidator.validateOffset(ctx.queryParam("offset"));
+        ctx.json(replayEngine.buildTimeline(id, limit, offset));
     }
 
     /** GET /api/aggregates/{id}/replay */
     public void replay(Context ctx) {
-        ctx.json(replayEngine.replayFull(ctx.pathParam("id")));
+        String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
+        ctx.json(replayEngine.replayFull(id));
     }
 
     /** GET /api/aggregates/{id}/replay/{seq} */
     public void replayTo(Context ctx) {
+        String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
         long seq = Long.parseLong(ctx.pathParam("seq"));
-        ctx.json(replayEngine.replayTo(ctx.pathParam("id"), seq));
+        ctx.json(replayEngine.replayTo(id, seq));
     }
 
     /** GET /api/aggregates/{id}/transitions */
     public void transitions(Context ctx) {
-        ctx.json(replayEngine.replayFull(ctx.pathParam("id")));
+        String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
+        ctx.json(replayEngine.replayFull(id));
     }
 }

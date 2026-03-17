@@ -1,5 +1,6 @@
 package io.eventlens.api.routes;
 
+import io.eventlens.core.InputValidator;
 import io.eventlens.core.engine.ExportEngine;
 import io.javalin.http.Context;
 
@@ -14,6 +15,8 @@ public class ExportRoutes {
 
     /** GET /api/aggregates/{id}/export?format=json|markdown|csv|junit */
     public void export(Context ctx) {
+        String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
+
         String formatStr = ctx.queryParamAsClass("format", String.class).getOrDefault("json");
         ExportEngine.Format format = switch (formatStr.toLowerCase()) {
             case "markdown" -> ExportEngine.Format.MARKDOWN;
@@ -22,7 +25,7 @@ public class ExportRoutes {
             default -> ExportEngine.Format.JSON;
         };
 
-        String content = exportEngine.export(ctx.pathParam("id"), format);
+        String content = exportEngine.export(id, format);
 
         String contentType = switch (format) {
             case MARKDOWN -> "text/markdown";

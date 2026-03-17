@@ -5,6 +5,7 @@ import io.eventlens.core.exception.ConfigurationException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public final class ConfigValidator {
@@ -105,6 +106,23 @@ public final class ConfigValidator {
             }
             if (isBlank(ds.getUsername())) {
                 issues.add(error("datasource.username", "Required"));
+            }
+            if (ds.getColumns() != null && ds.getColumns().hasAnyOverride()) {
+                try {
+                    InputValidator.validateColumnMapping(Map.ofEntries(
+                            Map.entry("event-id", ds.getColumns().getEventId()),
+                            Map.entry("aggregate-id", ds.getColumns().getAggregateId()),
+                            Map.entry("aggregate-type", ds.getColumns().getAggregateType()),
+                            Map.entry("sequence", ds.getColumns().getSequence()),
+                            Map.entry("event-type", ds.getColumns().getEventType()),
+                            Map.entry("payload", ds.getColumns().getPayload()),
+                            Map.entry("metadata", ds.getColumns().getMetadata()),
+                            Map.entry("timestamp", ds.getColumns().getTimestamp()),
+                            Map.entry("global-position", ds.getColumns().getGlobalPosition())
+                    ));
+                } catch (ConfigurationException e) {
+                    issues.add(error("datasource.columns", e.getMessage()));
+                }
             }
         }
 

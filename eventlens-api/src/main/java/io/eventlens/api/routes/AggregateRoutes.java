@@ -1,5 +1,6 @@
 package io.eventlens.api.routes;
 
+import io.eventlens.core.InputValidator;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.http.Context;
 
@@ -24,7 +25,9 @@ public class AggregateRoutes {
             ctx.status(400).json(Map.of("error", "Missing query parameter: q"));
             return;
         }
-        int limit = Math.min(ctx.queryParamAsClass("limit", Integer.class).getOrDefault(20), MAX_LIMIT);
+        int limit = Math.min(
+                InputValidator.validateLimit(ctx.queryParam("limit"), 20, MAX_LIMIT),
+                MAX_LIMIT);
         ctx.json(reader.searchAggregates(query, limit));
     }
 
@@ -35,7 +38,9 @@ public class AggregateRoutes {
 
     /** GET /api/events/recent?limit=50 */
     public void recentEvents(Context ctx) {
-        int limit = Math.min(ctx.queryParamAsClass("limit", Integer.class).getOrDefault(50), MAX_LIMIT);
+        int limit = Math.min(
+                InputValidator.validateLimit(ctx.queryParam("limit"), 50, MAX_LIMIT),
+                MAX_LIMIT);
         ctx.json(reader.getRecentEvents(limit));
     }
 }

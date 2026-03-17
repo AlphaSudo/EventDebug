@@ -1,5 +1,6 @@
 package io.eventlens.api.routes;
 
+import io.eventlens.core.InputValidator;
 import io.eventlens.core.engine.BisectEngine;
 import io.eventlens.core.exception.ConditionParseException;
 import io.javalin.http.Context;
@@ -20,6 +21,7 @@ public class BisectRoutes {
 
     /** POST /api/aggregates/{id}/bisect — body: "balance < 0" */
     public void bisect(Context ctx) {
+        String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
         String expression = ctx.body().trim();
         if (expression.isBlank()) {
             ctx.status(400).json(Map.of("error", "Request body must contain a condition expression"));
@@ -27,7 +29,7 @@ public class BisectRoutes {
         }
         try {
             var predicate = BisectEngine.parseCondition(expression);
-            ctx.json(bisectEngine.bisect(ctx.pathParam("id"), predicate));
+            ctx.json(bisectEngine.bisect(id, predicate));
         } catch (ConditionParseException e) {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         }

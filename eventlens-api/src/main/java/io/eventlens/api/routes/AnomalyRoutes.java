@@ -1,5 +1,6 @@
 package io.eventlens.api.routes;
 
+import io.eventlens.core.InputValidator;
 import io.eventlens.core.engine.AnomalyDetector;
 import io.javalin.http.Context;
 
@@ -16,12 +17,15 @@ public class AnomalyRoutes {
 
     /** GET /api/aggregates/{id}/anomalies */
     public void scanAggregate(Context ctx) {
-        ctx.json(anomalyDetector.scan(ctx.pathParam("id")));
+        String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
+        ctx.json(anomalyDetector.scan(id));
     }
 
     /** GET /api/anomalies/recent?limit=100 */
     public void scanRecent(Context ctx) {
-        int limit = Math.min(ctx.queryParamAsClass("limit", Integer.class).getOrDefault(100), MAX_SCAN_LIMIT);
+        int limit = Math.min(
+                InputValidator.validateLimit(ctx.queryParam("limit"), 100, MAX_SCAN_LIMIT),
+                MAX_SCAN_LIMIT);
         ctx.json(anomalyDetector.scanRecent(limit));
     }
 }
