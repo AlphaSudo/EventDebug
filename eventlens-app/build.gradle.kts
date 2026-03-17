@@ -1,11 +1,8 @@
 plugins {
-    application
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    java
+    id("com.gradleup.shadow") version "8.3.6"
 }
 
-application {
-    mainClass.set("io.eventlens.EventLensMain")
-}
 
 dependencies {
     implementation(project(":eventlens-core"))

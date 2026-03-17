@@ -19,10 +19,10 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    - name: Set up Node.js 18
+    - name: Set up Node.js 22
       uses: actions/setup-node@v6
       with:
-        node-version: '18'
+        node-version: '22'
 
     - name: Give execute permission for gradlew
       run: chmod +x gradlew
