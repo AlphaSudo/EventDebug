@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * EventLens Javalin HTTP server.
@@ -56,6 +57,46 @@ public class EventLensServer {
         });
 
         // ── Security middleware ────────────────────────────────────────────
+        app.before(ctx -> {
+            // Prevent clickjacking
+            ctx.header("X-Frame-Options", "DENY");
+
+            // Prevent MIME sniffing
+            ctx.header("X-Content-Type-Options", "nosniff");
+
+            // XSS protection (legacy browsers)
+            ctx.header("X-XSS-Protection", "1; mode=block");
+
+            // Referrer policy
+            ctx.header("Referrer-Policy", "strict-origin-when-cross-origin");
+
+            // Permissions policy (disable browser features we don't need)
+            ctx.header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+
+            // Content Security Policy (keep compatible with embedded React UI)
+            ctx.header("Content-Security-Policy",
+                    "default-src 'self'; " +
+                            "script-src 'self'; " +
+                            "style-src 'self' 'unsafe-inline'; " +
+                            "img-src 'self' data:; " +
+                            "connect-src 'self' ws: wss:; " +
+                            "font-src 'self'; " +
+                            "frame-ancestors 'none'");
+
+            // HSTS (only when TLS is detected — reverse proxy sets X-Forwarded-Proto)
+            if ("https".equalsIgnoreCase(ctx.header("X-Forwarded-Proto"))) {
+                ctx.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+            }
+
+            // Request ID correlation
+            String requestId = ctx.header("X-Request-Id");
+            if (requestId == null || requestId.isBlank()) {
+                requestId = "el-" + UUID.randomUUID().toString().substring(0, 12);
+            }
+            ctx.header("X-Request-Id", requestId);
+            ctx.attribute("requestId", requestId);
+        });
+
         var authConfig = config.getServer().getAuth();
         if (authConfig.isEnabled()) {
             if ("changeme".equals(authConfig.getPassword())) {

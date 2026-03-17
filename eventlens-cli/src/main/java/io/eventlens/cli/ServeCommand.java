@@ -2,6 +2,7 @@ package io.eventlens.cli;
 
 import io.eventlens.api.EventLensServer;
 import io.eventlens.api.websocket.LiveTailWebSocket;
+import io.eventlens.core.ConfigValidator;
 import io.eventlens.core.ConfigLoader;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.aggregator.*;
@@ -62,6 +63,8 @@ public class ServeCommand implements Runnable {
             config.getDatasource().setPassword(dbPassword);
         if (tableName != null)
             config.getDatasource().setTable(tableName);
+
+        ConfigValidator.validateOrThrow(config);
 
         var pgConfig = new PgConfig(
                 config.getDatasource().getUrl(),
