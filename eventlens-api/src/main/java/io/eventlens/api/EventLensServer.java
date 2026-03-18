@@ -2,11 +2,13 @@ package io.eventlens.api;
 
 import io.eventlens.api.routes.*;
 import io.eventlens.api.websocket.LiveTailWebSocket;
+import io.eventlens.api.export.ExportService;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.RateLimiter;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.*;
+import io.eventlens.core.exception.QueryTimeoutException;
 import io.eventlens.core.pii.PiiMasker;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.Javalin;
@@ -41,6 +43,7 @@ public class EventLensServer {
 
     private final Javalin app;
     private final int port;
+    private final ExportService exportService;
 
     public EventLensServer(
             EventLensConfig config,
@@ -60,9 +63,13 @@ public class EventLensServer {
         final PiiMasker piiMasker = new PiiMasker(
                 config.getDataProtection().getPii());
 
+        // ── 2.6 Async Export ───────────────────────────────────────────────
+        this.exportService = new ExportService(reader, auditLogger, config.getExport());
+
         this.app = Javalin.create(cfg -> {
             cfg.staticFiles.add("/web"); // Embedded React build
             cfg.jsonMapper(new JavalinJackson());
+            cfg.http.gzipOnlyCompression();
         });
 
         // ── Security middleware ────────────────────────────────────────────
@@ -126,7 +133,7 @@ public class EventLensServer {
             }
 
             ctx.header("Access-Control-Allow-Origin", origin);
-            ctx.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+            ctx.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
             ctx.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-Id");
             ctx.header("Access-Control-Max-Age", String.valueOf(config.getServer().getCorsMaxAgeSeconds()));
             ctx.header("Access-Control-Allow-Credentials", "true");
@@ -230,6 +237,7 @@ public class EventLensServer {
         var bisectRoutes    = new BisectRoutes(bisectEngine);
         var anomalyRoutes   = new AnomalyRoutes(anomalyDetector, auditLogger);
         var exportRoutes    = new ExportRoutes(exportEngine, auditLogger);
+        var asyncExportRoutes = new AsyncExportRoutes(exportService);
         var healthRoutes    = new HealthRoutes(reader);
         var liveTailWs      = new LiveTailWebSocket(reader, auditLogger);
 
@@ -257,10 +265,32 @@ public class EventLensServer {
         // Export
         app.get("/api/aggregates/{id}/export", exportRoutes::export);
 
+        // Async Export (2.6)
+        app.post("/api/events/export", asyncExportRoutes::start);
+        app.get("/api/events/export/{exportId}", asyncExportRoutes::status);
+        app.get("/api/events/export/{exportId}/download", asyncExportRoutes::download);
+
         // WebSocket live tail
         liveTailWs.configure(app);
 
         // ── Error handling ─────────────────────────────────────────────────
+        app.exception(io.eventlens.core.InputValidator.ValidationException.class,
+                (e, ctx) -> ctx.status(400).json(Map.of(
+                        "error", "validation_error",
+                        "field", e.getField(),
+                        "message", e.getMessage()
+                )));
+        app.exception(QueryTimeoutException.class,
+                (e, ctx) -> ctx.status(504).json(Map.of(
+                        "error", "query_timeout",
+                        "message", e.getMessage(),
+                        "timeoutSeconds", e.getTimeoutSeconds()
+                )));
+        app.exception(IllegalStateException.class,
+                (e, ctx) -> ctx.status(429).json(Map.of(
+                        "error", "too_many_requests",
+                        "message", e.getMessage()
+                )));
         app.exception(IllegalArgumentException.class,
                 (e, ctx) -> ctx.status(400).json(Map.of("error", e.getMessage())));
         app.exception(io.eventlens.core.exception.EventLensException.class,
@@ -278,6 +308,10 @@ public class EventLensServer {
 
     public void stop() {
         app.stop();
+        try {
+            exportService.close();
+        } catch (Exception ignored) {
+        }
     }
 
     public Javalin getApp() {

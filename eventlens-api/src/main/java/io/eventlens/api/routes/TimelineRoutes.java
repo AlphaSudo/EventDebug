@@ -4,9 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import io.eventlens.core.InputValidator;
+import io.eventlens.api.http.ConditionalGet;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.ReplayEngine;
+import io.eventlens.core.pagination.CursorCodec;
 import io.eventlens.core.model.AggregateTimeline;
 import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.pii.PiiMasker;
@@ -53,9 +55,25 @@ public class TimelineRoutes {
         int    limit = Math.min(
                 InputValidator.validateLimit(ctx.queryParam("limit"), 500, MAX_LIMIT),
                 MAX_LIMIT);
+        String cursorParam = ctx.queryParam("cursor");
         int offset = InputValidator.validateOffset(ctx.queryParam("offset"));
 
-        AggregateTimeline timeline = replayEngine.buildTimeline(id, limit, offset);
+        AggregateTimeline timeline;
+        boolean hasMore = false;
+        String nextCursor = null;
+
+        if (cursorParam != null && !cursorParam.isBlank()) {
+            var cursor = CursorCodec.decode(cursorParam);
+            var page = replayEngine.buildTimelineAfter(id, limit, cursor.sequence());
+            timeline = new AggregateTimeline(page.aggregateId(), page.aggregateType(), page.events(), page.totalEvents());
+            hasMore = page.hasMore();
+            if (!page.events().isEmpty()) {
+                var last = page.events().getLast();
+                nextCursor = CursorCodec.encode(last.sequenceNumber(), last.timestamp());
+            }
+        } else {
+            timeline = replayEngine.buildTimeline(id, limit, offset);
+        }
 
         // 1.9 — apply PII masking on each event payload
         AggregateTimeline masked = maskTimeline(timeline);
@@ -70,11 +88,26 @@ public class TimelineRoutes {
                 .clientIp(clientIp(ctx))
                 .requestId(requestId(ctx))
                 .userAgent(ctx.userAgent())
-                .details(Map.of("limit", limit, "offset", offset,
+                .details(Map.of(
+                        "limit", limit,
+                        "offset", offset,
+                        "cursor", cursorParam != null ? cursorParam : "",
                         "eventCount", masked.events().size()))
                 .build());
 
-        ctx.json(masked);
+        Object response = nextCursor != null
+                ? Map.of(
+                "aggregateId", masked.aggregateId(),
+                "aggregateType", masked.aggregateType(),
+                "events", masked.events(),
+                "totalEvents", masked.totalEvents(),
+                "pagination", Map.of(
+                        "limit", limit,
+                        "hasMore", hasMore,
+                        "nextCursor", nextCursor
+                ))
+                : masked;
+        ConditionalGet.json(ctx, response);
     }
 
     /** GET /api/aggregates/{id}/replay */

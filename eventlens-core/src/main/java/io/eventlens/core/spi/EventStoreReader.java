@@ -30,6 +30,21 @@ public interface EventStoreReader {
         return getEvents(aggregateId);
     }
 
+    /**
+     * Keyset pagination: return events with sequence_number &gt; afterSequence.
+     * Implementations should execute this efficiently (no OFFSET scans).
+     *
+     * <p>
+     * Default implementation is a compatibility fallback (loads full history and
+     * filters in-memory). Database-backed readers should override.
+     */
+    default List<StoredEvent> getEventsAfterSequence(String aggregateId, long afterSequence, int limit) {
+        return getEvents(aggregateId).stream()
+                .filter(e -> e.sequenceNumber() > afterSequence)
+                .limit(limit)
+                .toList();
+    }
+
     /** Get events for an aggregate up to a sequence number (inclusive). */
     List<StoredEvent> getEventsUpTo(String aggregateId, long maxSequence);
 

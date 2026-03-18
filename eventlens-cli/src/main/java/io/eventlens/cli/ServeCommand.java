@@ -72,7 +72,9 @@ public class ServeCommand implements Runnable {
                 config.getDatasource().getUsername(),
                 config.getDatasource().getPassword(),
                 config.getDatasource().getTable(),
-                config.getDatasource().getColumns()); // Fix 1: pass column overrides
+                config.getDatasource().getColumns(), // Fix 1: pass column overrides
+                config.getDatasource().getPool(),
+                config.getDatasource().getQueryTimeoutSeconds());
 
         var reader = new PgEventStoreReader(pgConfig);
         var registry = new ReducerRegistry();

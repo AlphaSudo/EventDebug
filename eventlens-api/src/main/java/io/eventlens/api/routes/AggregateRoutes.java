@@ -1,5 +1,6 @@
 package io.eventlens.api.routes;
 
+import io.eventlens.api.http.ConditionalGet;
 import io.eventlens.core.InputValidator;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
@@ -52,12 +53,12 @@ public class AggregateRoutes {
                 .details(Map.of("q", query, "limit", limit, "resultCount", result.size()))
                 .build());
 
-        ctx.json(result);
+        ConditionalGet.json(ctx, result);
     }
 
     /** GET /api/meta/types */
     public void types(Context ctx) {
-        ctx.json(reader.getAggregateTypes());
+        ConditionalGet.json(ctx, reader.getAggregateTypes());
     }
 
     /** GET /api/events/recent?limit=50 */
@@ -65,7 +66,7 @@ public class AggregateRoutes {
         int limit = Math.min(
                 InputValidator.validateLimit(ctx.queryParam("limit"), 50, MAX_LIMIT),
                 MAX_LIMIT);
-        ctx.json(reader.getRecentEvents(limit));
+        ConditionalGet.json(ctx, reader.getRecentEvents(limit));
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ public class EventLensConfig {
     private UiConfig ui = new UiConfig();
     private AuditConfig audit = new AuditConfig();
     private DataProtectionConfig dataProtection = new DataProtectionConfig();
+    private ExportConfig export = new ExportConfig();
 
     // ── Getters / Setters ──────────────────────────────────────────────
 
@@ -82,6 +83,14 @@ public class EventLensConfig {
 
     public void setDataProtection(DataProtectionConfig dp) {
         this.dataProtection = dp;
+    }
+
+    public ExportConfig getExport() {
+        return export;
+    }
+
+    public void setExport(ExportConfig export) {
+        this.export = export;
     }
 
     // ── Nested configs ─────────────────────────────────────────────────
@@ -212,6 +221,8 @@ public class EventLensConfig {
         private String password = "";
         private String table; // null = auto-detect
         private ColumnMappingConfig columns = new ColumnMappingConfig();
+        private PoolConfig pool = new PoolConfig();
+        private int queryTimeoutSeconds = 30;
 
         public String getUrl() {
             return url;
@@ -251,6 +262,120 @@ public class EventLensConfig {
 
         public void setColumns(ColumnMappingConfig columns) {
             this.columns = columns;
+        }
+
+        public PoolConfig getPool() {
+            return pool;
+        }
+
+        public void setPool(PoolConfig pool) {
+            this.pool = pool;
+        }
+
+        public int getQueryTimeoutSeconds() {
+            return queryTimeoutSeconds;
+        }
+
+        public void setQueryTimeoutSeconds(int queryTimeoutSeconds) {
+            this.queryTimeoutSeconds = queryTimeoutSeconds;
+        }
+    }
+
+    public static class PoolConfig {
+        private int maximumPoolSize = 10;
+        private int minimumIdle = 2;
+        private long connectionTimeoutMs = 5_000;
+        private long idleTimeoutMs = 300_000;
+        private long maxLifetimeMs = 900_000;
+        private long leakDetectionThresholdMs = 30_000;
+
+        public int getMaximumPoolSize() {
+            return maximumPoolSize;
+        }
+
+        public void setMaximumPoolSize(int maximumPoolSize) {
+            this.maximumPoolSize = maximumPoolSize;
+        }
+
+        public int getMinimumIdle() {
+            return minimumIdle;
+        }
+
+        public void setMinimumIdle(int minimumIdle) {
+            this.minimumIdle = minimumIdle;
+        }
+
+        public long getConnectionTimeoutMs() {
+            return connectionTimeoutMs;
+        }
+
+        public void setConnectionTimeoutMs(long connectionTimeoutMs) {
+            this.connectionTimeoutMs = connectionTimeoutMs;
+        }
+
+        public long getIdleTimeoutMs() {
+            return idleTimeoutMs;
+        }
+
+        public void setIdleTimeoutMs(long idleTimeoutMs) {
+            this.idleTimeoutMs = idleTimeoutMs;
+        }
+
+        public long getMaxLifetimeMs() {
+            return maxLifetimeMs;
+        }
+
+        public void setMaxLifetimeMs(long maxLifetimeMs) {
+            this.maxLifetimeMs = maxLifetimeMs;
+        }
+
+        public long getLeakDetectionThresholdMs() {
+            return leakDetectionThresholdMs;
+        }
+
+        public void setLeakDetectionThresholdMs(long leakDetectionThresholdMs) {
+            this.leakDetectionThresholdMs = leakDetectionThresholdMs;
+        }
+    }
+
+    // ── 2.6 Async Export ─────────────────────────────────────────────────
+
+    public static class ExportConfig {
+        private String directory = "./exports";
+        private int maxConcurrent = 2;
+        private int maxEventsPerExport = 100_000;
+        private int expireAfterSeconds = 3_600;
+
+        public String getDirectory() {
+            return directory;
+        }
+
+        public void setDirectory(String directory) {
+            this.directory = directory;
+        }
+
+        public int getMaxConcurrent() {
+            return maxConcurrent;
+        }
+
+        public void setMaxConcurrent(int maxConcurrent) {
+            this.maxConcurrent = maxConcurrent;
+        }
+
+        public int getMaxEventsPerExport() {
+            return maxEventsPerExport;
+        }
+
+        public void setMaxEventsPerExport(int maxEventsPerExport) {
+            this.maxEventsPerExport = maxEventsPerExport;
+        }
+
+        public int getExpireAfterSeconds() {
+            return expireAfterSeconds;
+        }
+
+        public void setExpireAfterSeconds(int expireAfterSeconds) {
+            this.expireAfterSeconds = expireAfterSeconds;
         }
     }
 

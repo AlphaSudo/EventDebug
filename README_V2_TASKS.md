@@ -25,12 +25,12 @@ It is meant to be updated as work lands in the repo.
 
 ## EPIC 2: Performance & Scalability
 
-- [ ] **2.1 Cursor (Keyset) Pagination**
-- [ ] **2.2 HikariCP Connection Pool Tuning**
-- [ ] **2.3 Query Timeout Enforcement**
-- [ ] **2.4 Response Compression**
-- [ ] **2.5 ETag / Conditional GET**
-- [ ] **2.6 Async Export**
+- [x] **2.1 Cursor (Keyset) Pagination**
+- [x] **2.2 HikariCP Connection Pool Tuning**
+- [x] **2.3 Query Timeout Enforcement**
+- [x] **2.4 Response Compression**
+- [x] **2.5 ETag / Conditional GET**
+- [x] **2.6 Async Export**
 
 ## EPIC 3: Reliability & Resilience
 
