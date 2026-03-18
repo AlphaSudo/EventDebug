@@ -11,7 +11,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
 
-@org.junit.jupiter.api.Disabled("Requires Docker")
 @Testcontainers
 class PgEventStoreReaderIntegrationTest {
 
