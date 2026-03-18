@@ -3,6 +3,7 @@ package io.eventlens.api;
 import io.eventlens.api.routes.*;
 import io.eventlens.api.websocket.LiveTailWebSocket;
 import io.eventlens.api.export.ExportService;
+import io.eventlens.api.shutdown.GracefulShutdown;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.RateLimiter;
 import io.eventlens.core.audit.AuditEvent;
@@ -44,6 +45,7 @@ public class EventLensServer {
     private final Javalin app;
     private final int port;
     private final ExportService exportService;
+    private final EventStoreReader reader;
 
     public EventLensServer(
             EventLensConfig config,
@@ -54,6 +56,7 @@ public class EventLensServer {
             ExportEngine exportEngine,
             DiffEngine diffEngine) {
         this.port = config.getServer().getPort();
+        this.reader = reader;
 
         // ── 1.8 Audit Logger ──────────────────────────────────────────────
         final AuditLogger auditLogger = new AuditLogger(
@@ -238,11 +241,14 @@ public class EventLensServer {
         var anomalyRoutes   = new AnomalyRoutes(anomalyDetector, auditLogger);
         var exportRoutes    = new ExportRoutes(exportEngine, auditLogger);
         var asyncExportRoutes = new AsyncExportRoutes(exportService);
-        var healthRoutes    = new HealthRoutes(reader);
+        var healthRoutes    = new HealthRoutes(reader, config.getVersion());
         var liveTailWs      = new LiveTailWebSocket(reader, auditLogger);
 
-        // Health
-        app.get("/api/health", healthRoutes::health);
+        // Health (3.3) + legacy alias
+        app.get("/api/v1/health/live", healthRoutes::live);
+        app.get("/api/v1/health/ready", healthRoutes::ready);
+        // Backwards-compatible endpoint used by tests and existing deployments
+        app.get("/api/health", healthRoutes::ready);
 
         // Aggregates
         app.get("/api/aggregates/search", aggregateRoutes::search);
@@ -303,15 +309,24 @@ public class EventLensServer {
 
     public void start() {
         app.start(port);
+        GracefulShutdown.register(app, java.util.List.of(
+                () -> {
+                    try {
+                        exportService.close();
+                    } catch (Exception ignored) {
+                    }
+                },
+                () -> {
+                    if (reader instanceof AutoCloseable closeable) {
+                        closeable.close();
+                    }
+                }
+        ));
         log.info("EventLens running at http://localhost:{}", port);
     }
 
     public void stop() {
         app.stop();
-        try {
-            exportService.close();
-        } catch (Exception ignored) {
-        }
     }
 
     public Javalin getApp() {

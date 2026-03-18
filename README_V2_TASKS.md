@@ -34,9 +34,9 @@ It is meant to be updated as work lands in the repo.
 
 ## EPIC 3: Reliability & Resilience
 
-- [ ] **3.1 Circuit Breaker (Resilience4j)**
-- [ ] **3.2 Graceful Shutdown**
-- [ ] **3.3 Health Endpoints (Liveness + Readiness)**
+- [x] **3.1 Circuit Breaker (Resilience4j)**
+- [x] **3.2 Graceful Shutdown**
+- [x] **3.3 Health Endpoints (Liveness + Readiness)**
 
 ## EPIC 4: Observability
 

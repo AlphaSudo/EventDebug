@@ -18,6 +18,7 @@ public class EventLensConfig {
     private AuditConfig audit = new AuditConfig();
     private DataProtectionConfig dataProtection = new DataProtectionConfig();
     private ExportConfig export = new ExportConfig();
+    private String version = "2.0.0";
 
     // ── Getters / Setters ──────────────────────────────────────────────
 
@@ -91,6 +92,14 @@ public class EventLensConfig {
 
     public void setExport(ExportConfig export) {
         this.export = export;
+    }
+
+    public String getVersion() {
+        return version;
+    }
+
+    public void setVersion(String version) {
+        this.version = version;
     }
 
     // ── Nested configs ─────────────────────────────────────────────────
