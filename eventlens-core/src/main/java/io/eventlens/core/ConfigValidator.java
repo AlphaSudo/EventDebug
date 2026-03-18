@@ -124,6 +124,28 @@ public final class ConfigValidator {
                     issues.add(error("datasource.columns", e.getMessage()));
                 }
             }
+
+            // --- HikariCP pool sizing (elastic pooling) ---
+            var pool = ds.getPool();
+            if (pool != null) {
+                if (pool.getMaximumPoolSize() < 1 || pool.getMaximumPoolSize() > 200) {
+                    issues.add(error("datasource.pool.maximum-pool-size", "Must be between 1 and 200"));
+                }
+                if (pool.getMinimumIdle() < 0 || pool.getMinimumIdle() > 200) {
+                    issues.add(error("datasource.pool.minimum-idle", "Must be between 0 and 200"));
+                }
+                if (pool.getMinimumIdle() > pool.getMaximumPoolSize()) {
+                    issues.add(error("datasource.pool.minimum-idle",
+                            "Must be <= maximum-pool-size"));
+                } else if (pool.getMinimumIdle() == pool.getMaximumPoolSize() && pool.getMaximumPoolSize() > 10) {
+                    issues.add(warning("datasource.pool.minimum-idle",
+                            "minimum-idle equals maximum-pool-size; this keeps all connections warm but can waste RAM. Consider elastic pooling (e.g. minimum-idle=5, maximum-pool-size=50)."));
+                }
+            }
+
+            if (ds.getQueryTimeoutSeconds() < 1 || ds.getQueryTimeoutSeconds() > 600) {
+                issues.add(error("datasource.query-timeout-seconds", "Must be between 1 and 600"));
+            }
         }
 
         // --- Kafka (optional) ---
