@@ -20,8 +20,8 @@ It is meant to be updated as work lands in the repo.
 - [x] **1.5 CORS Hardening**
 - [x] **1.6 Input Validation & SQL Injection Prevention**
 - [-] **1.7 OIDC / OAuth2 Support (MOVED to v5 — not in v2)**
-- [ ] **1.8 Audit Logging (Log-Based)**
-- [ ] **1.9 Basic PII Masking**
+- [x] **1.8 Audit Logging (Log-Based)**
+- [x] **1.9 Basic PII Masking**
 
 ## EPIC 2: Performance & Scalability
 

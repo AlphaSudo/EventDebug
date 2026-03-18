@@ -6,6 +6,7 @@ import io.eventlens.core.ConfigValidator;
 import io.eventlens.core.ConfigLoader;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.aggregator.*;
+import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.*;
 import io.eventlens.kafka.*;
 import io.eventlens.pg.*;
@@ -106,8 +107,10 @@ public class ServeCommand implements Runnable {
 
         var server = new EventLensServer(config, reader, replayEngine,
                 bisectEngine, anomalyDetector, exportEngine, diffEngine);
-        var liveTail = new LiveTailWebSocket(reader);
-        liveTail.configure(server.getApp());
+        // LiveTailWebSocket is wired and configured inside EventLensServer (v2).
+        // We still need a reference here for Kafka listener wiring.
+        var auditLogger = new AuditLogger(config.getAudit().isEnabled());
+        var liveTail = new LiveTailWebSocket(reader, auditLogger);
 
         final KafkaLiveTail kafkaToClose = kafkaTail;
         if (kafkaTail != null) {

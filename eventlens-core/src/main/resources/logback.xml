@@ -18,6 +18,29 @@
         </encoder>
     </appender>
 
+    <!--
+        1.8 AUDIT LOGGING
+        Dedicated rolling file for structured audit entries (one JSON object per
+        line).  additivity=false keeps audit records out of the main log file.
+        Retained for 90 days, capped at 1 GB total.
+    -->
+    <appender name="AUDIT" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/audit.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/audit.%d{yyyy-MM-dd}.log.gz</fileNamePattern>
+            <maxHistory>90</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+        <!-- Plain encoder — AuditLogger already serialises the message to JSON -->
+        <encoder>
+            <pattern>%msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="eventlens.audit" level="INFO" additivity="false">
+        <appender-ref ref="AUDIT"/>
+    </logger>
+
     <!-- Reduce noise from libraries -->
     <logger name="com.zaxxer.hikari" level="WARN"/>
     <logger name="org.apache.kafka"  level="WARN"/>

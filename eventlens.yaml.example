@@ -43,3 +43,32 @@ anomaly:
 
 ui:
   theme: dark                  # dark | light
+
+# ── 1.8 Audit Logging ─────────────────────────────────────────────────────────
+# Every significant API action (search, timeline view, export, login, WebSocket
+# connect) is written as a structured JSON line to logs/audit.log.
+# The file rolls daily and is retained for 90 days (configurable in logback.xml).
+audit:
+  enabled: true                # set to false to silence audit log entirely
+
+# ── 1.9 PII Masking ───────────────────────────────────────────────────────────
+# Scans event payloads in API responses for common PII patterns and replaces
+# matching text with the configured mask string.
+# Masking is global in v2 (role-based bypass comes in v5).
+# Results are cached by payload hash — cost drops to <0.1ms after warm-up.
+data-protection:
+  pii:
+    enabled: false             # default: off; set to true to activate
+    patterns:
+      - name: email
+        regex: "[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}"
+        mask: "***@***.***"
+      - name: phone
+        regex: "\\+?[1-9]\\d{7,14}"
+        mask: "***-***-****"
+      - name: ssn
+        regex: "\\d{3}-\\d{2}-\\d{4}"
+        mask: "***-**-****"
+      - name: credit-card
+        regex: "\\b\\d{4}[- ]?\\d{4}[- ]?\\d{4}[- ]?\\d{4}\\b"
+        mask: "****-****-****-****"

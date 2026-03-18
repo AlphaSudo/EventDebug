@@ -2,6 +2,8 @@ package io.eventlens.api.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import io.eventlens.core.audit.AuditEvent;
+import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.Javalin;
@@ -9,6 +11,7 @@ import io.javalin.websocket.WsContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -30,6 +33,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * On connect: sends the last 20 events as backfill so clients don't join a
  * blank screen. Backfill is sent asynchronously to avoid blocking the
  * Jetty onConnect handler thread.
+ *
+ * <p>v2 — emits {@link AuditEvent#ACTION_VIEW_LIVE_STREAM} on WebSocket
+ * connect (1.8 Audit Logging).
  */
 public class LiveTailWebSocket {
 
@@ -41,11 +47,13 @@ public class LiveTailWebSocket {
             .findAndRegisterModules()
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     private final EventStoreReader reader;
+    private final AuditLogger      auditLogger;
     private final ExecutorService backfillExecutor = Executors.newCachedThreadPool(
             Thread.ofVirtual().name("eventlens-backfill-", 0).factory());
 
-    public LiveTailWebSocket(EventStoreReader reader) {
-        this.reader = reader;
+    public LiveTailWebSocket(EventStoreReader reader, AuditLogger auditLogger) {
+        this.reader      = reader;
+        this.auditLogger = auditLogger;
     }
 
     /**
@@ -62,6 +70,20 @@ public class LiveTailWebSocket {
                 ctx.enableAutomaticPings(15, TimeUnit.SECONDS);
                 sessions.add(ctx);
                 log.debug("WebSocket client connected: {} ({} active)", ctx.sessionId(), sessions.size());
+
+                // 1.8 — audit live-stream connection
+                String userAgent = ctx.header("User-Agent");
+                auditLogger.log(AuditEvent.builder()
+                        .action(AuditEvent.ACTION_VIEW_LIVE_STREAM)
+                        .resourceType(AuditEvent.RT_STREAM)
+                        .userId("anonymous")          // WS upgrade doesn't carry the ctx attributes
+                        .authMethod("anonymous")
+                        .clientIp(extractIp(ctx))
+                        .requestId("ws-" + ctx.sessionId())
+                        .userAgent(userAgent)
+                        .details(Map.of("sessionId", ctx.sessionId(),
+                                "activeSessions", sessions.size()))
+                        .build());
 
                 backfillExecutor.submit(() -> backfill(ctx));
             });
@@ -143,5 +165,16 @@ public class LiveTailWebSocket {
             log.debug("WebSocket send failed for {}: {}", ctx.sessionId(), e.getMessage());
             return false;
         }
+    }
+
+    private static String extractIp(WsContext ctx) {
+        // WsContext exposes the underlying HTTP upgrade headers
+        String xff = ctx.header("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) {
+            int c = xff.indexOf(',');
+            return (c >= 0 ? xff.substring(0, c) : xff).trim();
+        }
+        String xri = ctx.header("X-Real-IP");
+        return xri != null && !xri.isBlank() ? xri.trim() : "unknown";
     }
 }

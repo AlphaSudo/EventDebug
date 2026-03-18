@@ -19,6 +19,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@org.junit.jupiter.api.Disabled("Requires Docker")
 @Testcontainers
 class KafkaLiveTailTest {
 

@@ -1,5 +1,6 @@
 package io.eventlens.core;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -14,6 +15,8 @@ public class EventLensConfig {
     private ReplayConfig replay = new ReplayConfig();
     private AnomalyConfig anomaly = new AnomalyConfig();
     private UiConfig ui = new UiConfig();
+    private AuditConfig audit = new AuditConfig();
+    private DataProtectionConfig dataProtection = new DataProtectionConfig();
 
     // ── Getters / Setters ──────────────────────────────────────────────
 
@@ -63,6 +66,22 @@ public class EventLensConfig {
 
     public void setUi(UiConfig u) {
         this.ui = u;
+    }
+
+    public AuditConfig getAudit() {
+        return audit;
+    }
+
+    public void setAudit(AuditConfig a) {
+        this.audit = a;
+    }
+
+    public DataProtectionConfig getDataProtection() {
+        return dataProtection;
+    }
+
+    public void setDataProtection(DataProtectionConfig dp) {
+        this.dataProtection = dp;
     }
 
     // ── Nested configs ─────────────────────────────────────────────────
@@ -473,5 +492,97 @@ public class EventLensConfig {
         public void setTheme(String theme) {
             this.theme = theme;
         }
+    }
+
+    // ── 1.8 Audit Logging ───────────────────────────────────────────────
+
+    public static class AuditConfig {
+        /** Enable writing structured audit entries to logs/audit.log. */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
+
+    // ── 1.9 PII Masking ─────────────────────────────────────────────────
+
+    public static class DataProtectionConfig {
+        private PiiConfig pii = new PiiConfig();
+
+        public PiiConfig getPii() {
+            return pii;
+        }
+
+        public void setPii(PiiConfig pii) {
+            this.pii = pii;
+        }
+    }
+
+    public static class PiiConfig {
+        /** Enable PII masking on event payloads in API responses. */
+        private boolean enabled = false;
+        private List<PiiPatternConfig> patterns = defaultPatterns();
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public List<PiiPatternConfig> getPatterns() {
+            return patterns;
+        }
+
+        public void setPatterns(List<PiiPatternConfig> patterns) {
+            this.patterns = patterns;
+        }
+
+        private static List<PiiPatternConfig> defaultPatterns() {
+            var list = new ArrayList<PiiPatternConfig>();
+            list.add(new PiiPatternConfig("email",
+                    "[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}",
+                    "***@***.***"));
+            list.add(new PiiPatternConfig("credit-card",
+                    "\\b\\d{4}[- ]?\\d{4}[- ]?\\d{4}[- ]?\\d{4}\\b",
+                    "****-****-****-****"));
+            list.add(new PiiPatternConfig("phone",
+                    "\\+?[1-9]\\d{7,14}",
+                    "***-***-****"));
+            list.add(new PiiPatternConfig("ssn",
+                    "\\d{3}-\\d{2}-\\d{4}",
+                    "***-**-****"));
+            return list;
+        }
+    }
+
+    public static class PiiPatternConfig {
+        private String name;
+        private String regex;
+        private String mask;
+
+        /** No-arg constructor required by SnakeYAML / Jackson. */
+        public PiiPatternConfig() {}
+
+        public PiiPatternConfig(String name, String regex, String mask) {
+            this.name  = name;
+            this.regex = regex;
+            this.mask  = mask;
+        }
+
+        public String getName()  { return name; }
+        public void setName(String name) { this.name = name; }
+
+        public String getRegex() { return regex; }
+        public void setRegex(String regex) { this.regex = regex; }
+
+        public String getMask()  { return mask; }
+        public void setMask(String mask) { this.mask = mask; }
     }
 }

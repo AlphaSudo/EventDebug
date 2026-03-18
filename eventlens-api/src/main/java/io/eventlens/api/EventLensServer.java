@@ -1,9 +1,13 @@
 package io.eventlens.api;
 
 import io.eventlens.api.routes.*;
+import io.eventlens.api.websocket.LiveTailWebSocket;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.RateLimiter;
+import io.eventlens.core.audit.AuditEvent;
+import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.*;
+import io.eventlens.core.pii.PiiMasker;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.Javalin;
 import io.javalin.json.JavalinJackson;
@@ -21,6 +25,15 @@ import java.util.UUID;
  * files.
  * CORS is configurable — defaults to localhost-only (not wildcard).
  * Basic auth middleware is applied when enabled in config.
+ *
+ * <p>v2 additions:
+ * <ul>
+ *   <li><b>1.8</b> — Audit logging: every significant API action emits a
+ *       structured {@link AuditEvent} written to {@code logs/audit.log}.</li>
+ *   <li><b>1.9</b> — PII masking: event payloads are scanned for common PII
+ *       patterns (email, phone, SSN, credit-card) before inclusion in API
+ *       responses.</li>
+ * </ul>
  */
 public class EventLensServer {
 
@@ -38,6 +51,14 @@ public class EventLensServer {
             ExportEngine exportEngine,
             DiffEngine diffEngine) {
         this.port = config.getServer().getPort();
+
+        // ── 1.8 Audit Logger ──────────────────────────────────────────────
+        final AuditLogger auditLogger = new AuditLogger(
+                config.getAudit().isEnabled());
+
+        // ── 1.9 PII Masker ────────────────────────────────────────────────
+        final PiiMasker piiMasker = new PiiMasker(
+                config.getDataProtection().getPii());
 
         this.app = Javalin.create(cfg -> {
             cfg.staticFiles.add("/web"); // Embedded React build
@@ -144,15 +165,49 @@ public class EventLensServer {
                 log.warn("Basic auth is enabled with default password 'changeme'. Change server.auth.password in production.");
             }
             String expectedAuth = authConfig.getUsername() + ":" + authConfig.getPassword();
+
             app.before("/api/*", ctx -> {
+                String clientIp = extractClientIp(ctx);
+                String requestId = ctx.attribute("requestId");
+                String userAgent = ctx.userAgent();
+                String suppliedUser = ctx.basicAuthCredentials() != null
+                        ? ctx.basicAuthCredentials().getUsername() : null;
                 String auth = ctx.basicAuthCredentials() != null
-                        ? ctx.basicAuthCredentials().getUsername() + ":" + ctx.basicAuthCredentials().getPassword()
+                        ? suppliedUser + ":" + ctx.basicAuthCredentials().getPassword()
                         : null;
+
                 if (!expectedAuth.equals(auth)) {
+                    // 1.8 — emit LOGIN_FAILED
+                    auditLogger.log(AuditEvent.builder()
+                            .action(AuditEvent.ACTION_LOGIN_FAILED)
+                            .resourceType(AuditEvent.RT_AUTH)
+                            .userId(suppliedUser != null ? suppliedUser : "anonymous")
+                            .authMethod("basic")
+                            .clientIp(clientIp)
+                            .requestId(requestId != null ? requestId : "unknown")
+                            .userAgent(userAgent)
+                            .details(Map.of("reason", "invalid_credentials", "path", ctx.path()))
+                            .build());
+
                     ctx.status(401)
                             .header("WWW-Authenticate", "Basic realm=\"EventLens\"")
                             .json(Map.of("error", "Unauthorized"));
                     ctx.skipRemainingHandlers();
+                } else {
+                    // 1.8 — emit LOGIN success (once per request, not once per session)
+                    auditLogger.log(AuditEvent.builder()
+                            .action(AuditEvent.ACTION_LOGIN)
+                            .resourceType(AuditEvent.RT_AUTH)
+                            .userId(suppliedUser)
+                            .authMethod("basic")
+                            .clientIp(clientIp)
+                            .requestId(requestId != null ? requestId : "unknown")
+                            .userAgent(userAgent)
+                            .details(Map.of("path", ctx.path()))
+                            .build());
+                    // Store principal for downstream audit events
+                    ctx.attribute("auditUserId", suppliedUser);
+                    ctx.attribute("auditAuthMethod", "basic");
                 }
             });
             app.before("/ws/*", ctx -> {
@@ -170,12 +225,13 @@ public class EventLensServer {
         }
 
         // ── Routes ─────────────────────────────────────────────────────────
-        var aggregateRoutes = new AggregateRoutes(reader);
-        var timelineRoutes = new TimelineRoutes(replayEngine);
-        var bisectRoutes = new BisectRoutes(bisectEngine);
-        var anomalyRoutes = new AnomalyRoutes(anomalyDetector);
-        var exportRoutes = new ExportRoutes(exportEngine);
-        var healthRoutes = new HealthRoutes(reader);
+        var aggregateRoutes = new AggregateRoutes(reader, auditLogger);
+        var timelineRoutes  = new TimelineRoutes(replayEngine, auditLogger, piiMasker);
+        var bisectRoutes    = new BisectRoutes(bisectEngine);
+        var anomalyRoutes   = new AnomalyRoutes(anomalyDetector, auditLogger);
+        var exportRoutes    = new ExportRoutes(exportEngine, auditLogger);
+        var healthRoutes    = new HealthRoutes(reader);
+        var liveTailWs      = new LiveTailWebSocket(reader, auditLogger);
 
         // Health
         app.get("/api/health", healthRoutes::health);
@@ -200,6 +256,9 @@ public class EventLensServer {
 
         // Export
         app.get("/api/aggregates/{id}/export", exportRoutes::export);
+
+        // WebSocket live tail
+        liveTailWs.configure(app);
 
         // ── Error handling ─────────────────────────────────────────────────
         app.exception(IllegalArgumentException.class,
