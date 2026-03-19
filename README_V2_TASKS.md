@@ -50,9 +50,9 @@ It is meant to be updated as work lands in the repo.
 
 ## EPIC 6: Frontend Improvements
 
-- [ ] **6.1 Bookmarkable URLs with State**
-- [ ] **6.2 JSON Syntax Highlighting with Folding**
-- [ ] **6.3 Loading States and Error Boundaries**
+- [x] **6.1 Bookmarkable URLs with State**
+- [x] **6.2 JSON Syntax Highlighting with Folding**
+- [x] **6.3 Loading States and Error Boundaries**
 
 ## EPIC 7: Deployment & Portability
 

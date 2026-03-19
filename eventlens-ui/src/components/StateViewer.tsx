@@ -1,6 +1,7 @@
 import { useReplay } from '../hooks/useReplay';
 import { parseEventTimestamp } from '../utils/time';
 import StateDiff from './StateDiff';
+import { useState } from 'react';
 
 interface Props {
     aggregateId: string;
@@ -8,7 +9,16 @@ interface Props {
 }
 
 export default function StateViewer({ aggregateId, sequence }: Props) {
-    const { data: transitions } = useReplay(aggregateId);
+    const { data: transitions, isLoading } = useReplay(aggregateId);
+
+    if (isLoading) {
+        return (
+            <div className="card">
+                <div className="card-title">🔬 State at Event</div>
+                <div className="skeleton" style={{ height: 120 }} />
+            </div>
+        );
+    }
 
     const transition = transitions?.find(t => t.event.sequenceNumber === sequence);
     if (!transition) return null;
@@ -18,6 +28,33 @@ export default function StateViewer({ aggregateId, sequence }: Props) {
     try { metadata = JSON.parse(event.metadata || '{}'); } catch { /* empty */ }
 
     const hasDiff = Object.keys(diff).length > 0;
+
+    const JsonBlock = ({ label, value }: { label: string; value: unknown }) => {
+        const [expanded, setExpanded] = useState(false);
+        const text = JSON.stringify(value, null, 2);
+        const lines = text.split('\n');
+        const MAX_LINES = 40;
+        const display = expanded || lines.length <= MAX_LINES
+            ? text
+            : [...lines.slice(0, MAX_LINES), '… (collapsed)'].join('\n');
+        return (
+            <div className="state-panel">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h4>{label}</h4>
+                    {lines.length > MAX_LINES && (
+                        <button
+                            className="link-button"
+                            type="button"
+                            onClick={() => setExpanded(e => !e)}
+                        >
+                            {expanded ? 'Collapse' : 'Expand'}
+                        </button>
+                    )}
+                </div>
+                <pre className="json-block">{display}</pre>
+            </div>
+        );
+    };
 
     return (
         <div className="card">
@@ -30,14 +67,8 @@ export default function StateViewer({ aggregateId, sequence }: Props) {
 
             {/* Before / After */}
             <div className="state-grid">
-                <div className="state-panel before">
-                    <h4>BEFORE</h4>
-                    <pre className="json-block">{JSON.stringify(stateBefore, null, 2)}</pre>
-                </div>
-                <div className="state-panel after">
-                    <h4>AFTER</h4>
-                    <pre className="json-block">{JSON.stringify(stateAfter, null, 2)}</pre>
-                </div>
+                <JsonBlock label="BEFORE" value={stateBefore} />
+                <JsonBlock label="AFTER" value={stateAfter} />
             </div>
 
             {/* Field-level diff */}

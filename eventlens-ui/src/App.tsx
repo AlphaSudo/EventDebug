@@ -93,6 +93,41 @@ export default function App() {
     const [selectedAggregate, setSelectedAggregate] = useState<string | null>(null);
     const [selectedSequence, setSelectedSequence] = useState<number | null>(null);
 
+    // 6.1 Bookmarkable URLs with state
+    // On mount: hydrate selection from query params
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const aggregateId = params.get('aggregateId');
+        const seq = params.get('seq');
+        if (aggregateId) {
+            setSelectedAggregate(aggregateId);
+        }
+        if (seq !== null) {
+            const n = Number(seq);
+            if (!Number.isNaN(n)) {
+                setSelectedSequence(n);
+            }
+        }
+    }, []);
+
+    // Whenever selection changes, reflect it in the URL query string
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (selectedAggregate) {
+            params.set('aggregateId', selectedAggregate);
+        } else {
+            params.delete('aggregateId');
+        }
+        if (selectedSequence != null) {
+            params.set('seq', String(selectedSequence));
+        } else {
+            params.delete('seq');
+        }
+        const qs = params.toString();
+        const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+        window.history.replaceState(null, '', newUrl);
+    }, [selectedAggregate, selectedSequence]);
+
     const { data: health } = useQuery({
         queryKey: ['health'],
         queryFn: getHealth,
