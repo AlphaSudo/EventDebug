@@ -56,7 +56,7 @@ It is meant to be updated as work lands in the repo.
 
 ## EPIC 7: Deployment & Portability
 
-- [ ] **7.1 Multi-Arch Docker Image**
+- [x] **7.1 Multi-Arch Docker Image**
 - [ ] **7.2 Basic Helm Chart**
 
 ## EPIC 8: Testing Infrastructure
