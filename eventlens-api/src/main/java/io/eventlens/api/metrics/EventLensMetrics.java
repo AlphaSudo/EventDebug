@@ -35,7 +35,9 @@ public final class EventLensMetrics {
     public static void initJvmMetrics(MeterRegistry r) {
         new ClassLoaderMetrics().bindTo(r);
         new JvmMemoryMetrics().bindTo(r);
-        new JvmGcMetrics().bindTo(r);
+        try (var gcMetrics = new JvmGcMetrics()) {
+            gcMetrics.bindTo(r);
+        }
         new JvmThreadMetrics().bindTo(r);
         new ProcessorMetrics().bindTo(r);
         new UptimeMetrics().bindTo(r);

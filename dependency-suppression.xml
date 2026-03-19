@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+
+    <!--
+        CVE-2020-29582: Insecure temp file permissions in Kotlin before 1.4.21.
+        FALSE POSITIVE — Our version (1.9.25) already includes the fix.
+        The NVD CPE range incorrectly extends to 2.1.0.
+        See: https://blog.jetbrains.com/kotlin/2021/02/security-advisory-insecure-temporary-file-creation-in-kotlin/
+    -->
+    <suppress>
+        <notes><![CDATA[
+            CVE-2020-29582 was fixed in Kotlin 1.4.21 (Dec 2020).
+            We use Kotlin stdlib 1.9.25 which already contains the fix.
+            This is a false positive due to the dependency-check CPE matching.
+        ]]></notes>
+        <cve>CVE-2020-29582</cve>
+    </suppress>
+
+</suppressions>

@@ -5,13 +5,24 @@ import io.javalin.Javalin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.time.Duration;
 import java.util.List;
 
+/**
+ * Graceful shutdown handler for the EventLens server.
+ *
+ * <p>Javalin 7 includes a built-in {@code StatisticsHandler} that ensures
+ * active requests are drained before the server actually stops. We only need
+ * to register a JVM shutdown hook that orchestrates:
+ * <ol>
+ *   <li>Mark the service as shutting down (health checks return not-ready).</li>
+ *   <li>Wait briefly so load balancers detect the not-ready state.</li>
+ *   <li>Stop Javalin (drains remaining in-flight requests).</li>
+ *   <li>Close application resources in reverse order.</li>
+ * </ol>
+ */
 public final class GracefulShutdown {
 
     private static final Logger log = LoggerFactory.getLogger(GracefulShutdown.class);
-    private static final Duration DRAIN_TIMEOUT = Duration.ofSeconds(30);
 
     private GracefulShutdown() {
     }
@@ -19,9 +30,6 @@ public final class GracefulShutdown {
     public static void register(Javalin app, List<AutoCloseable> resources) {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Shutdown signal received. Draining in-flight requests...");
-
-            // Stop accepting new requests
-            app.jettyServer().server().setStopTimeout(DRAIN_TIMEOUT.toMillis());
 
             // Mark not-ready
             HealthService.setShuttingDown(true);
@@ -33,7 +41,8 @@ public final class GracefulShutdown {
                 Thread.currentThread().interrupt();
             }
 
-            // Stop Javalin (drains remaining requests)
+            // Stop Javalin — Javalin 7's built-in StatisticsHandler drains
+            // active requests automatically before the server shuts down.
             try {
                 app.stop();
             } catch (Exception e) {
@@ -55,4 +64,3 @@ public final class GracefulShutdown {
         }, "eventlens-graceful-shutdown"));
     }
 }
-

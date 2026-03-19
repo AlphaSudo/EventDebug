@@ -23,7 +23,7 @@ public final class RequestContextMdcFilter implements Handler {
         MDC.put("clientIp", clientIp);
 
         MDC.put("method", ctx.method().name());
-        MDC.put("path", ctx.matchedPath());
+        MDC.put("path", ctx.path());
     }
 
     public static void clear() {

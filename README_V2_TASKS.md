@@ -3,6 +3,8 @@
 This file is an **execution checklist** derived from `versions/v2.txt`.
 It is meant to be updated as work lands in the repo.
 
+For detailed functional test scripts that validate each completed item, see `tests/README.md`.
+
 ### Status Legend
 
 - [ ] Not started
