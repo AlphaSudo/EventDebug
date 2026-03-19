@@ -40,13 +40,13 @@ It is meant to be updated as work lands in the repo.
 
 ## EPIC 4: Observability
 
-- [ ] **4.1 Prometheus Metrics Endpoint (Micrometer; trimmed histograms/labels to avoid large footprint)**
-- [ ] **4.2 Structured JSON Logging**
+- [x] **4.1 Prometheus Metrics Endpoint (Micrometer; trimmed histograms/labels to avoid large footprint)**
+- [x] **4.2 Structured JSON Logging**
 
 ## EPIC 5: API Versioning & OpenAPI
 
-- [ ] **5.1 API Versioning**
-- [ ] **5.2 OpenAPI 3.1 Specification**
+- [x] **5.1 API Versioning**
+- [x] **5.2 OpenAPI 3.1 Specification**
 
 ## EPIC 6: Frontend Improvements
 

@@ -4,6 +4,9 @@ import io.eventlens.api.routes.*;
 import io.eventlens.api.websocket.LiveTailWebSocket;
 import io.eventlens.api.export.ExportService;
 import io.eventlens.api.shutdown.GracefulShutdown;
+import io.eventlens.api.metrics.EventLensMetrics;
+import io.eventlens.api.routes.MetricsRoutes;
+import io.eventlens.api.http.RequestContextMdcFilter;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.RateLimiter;
 import io.eventlens.core.audit.AuditEvent;
@@ -75,6 +78,9 @@ public class EventLensServer {
             cfg.http.gzipOnlyCompression();
         });
 
+        // 4.1 Metrics: JVM binders + per-request instrumentation
+        EventLensMetrics.initJvmMetrics(EventLensMetrics.registry);
+
         // ── Security middleware ────────────────────────────────────────────
         var rateLimitCfg = config.getServer().getSecurity() != null
                 ? config.getServer().getSecurity().getRateLimit()
@@ -84,6 +90,8 @@ public class EventLensServer {
                 : null;
 
         app.before(ctx -> {
+            ctx.attribute("startNs", System.nanoTime());
+
             // Prevent clickjacking
             ctx.header("X-Frame-Options", "DENY");
 
@@ -121,6 +129,27 @@ public class EventLensServer {
             }
             ctx.header("X-Request-Id", requestId);
             ctx.attribute("requestId", requestId);
+
+            // 4.2 Structured logging context (MDC)
+            new RequestContextMdcFilter().handle(ctx);
+        });
+
+        app.after(ctx -> {
+            try {
+                // 4.1 HTTP metrics (templated path only)
+                String method = ctx.method().name();
+                String path = ctx.matchedPath();
+                int status = ctx.status() != null ? ctx.status().getCode() : 200;
+                EventLensMetrics.recordHttpRequest(method, path, status);
+
+                Long startNs = ctx.attribute("startNs");
+                if (startNs != null) {
+                    long durationNs = Math.max(0, System.nanoTime() - startNs);
+                    EventLensMetrics.recordHttpDuration(method, path, durationNs);
+                }
+            } finally {
+                RequestContextMdcFilter.clear();
+            }
         });
 
         // Strict CORS: allowlist only; GET + OPTIONS (read-only)
@@ -242,6 +271,8 @@ public class EventLensServer {
         var exportRoutes    = new ExportRoutes(exportEngine, auditLogger);
         var asyncExportRoutes = new AsyncExportRoutes(exportService);
         var healthRoutes    = new HealthRoutes(reader, config.getVersion());
+        var metricsRoutes   = new MetricsRoutes();
+        var openApiRoutes   = new OpenApiRoutes();
         var liveTailWs      = new LiveTailWebSocket(reader, auditLogger);
 
         // Health (3.3) + legacy alias
@@ -250,31 +281,100 @@ public class EventLensServer {
         // Backwards-compatible endpoint used by tests and existing deployments
         app.get("/api/health", healthRoutes::ready);
 
-        // Aggregates
-        app.get("/api/aggregates/search", aggregateRoutes::search);
-        app.get("/api/meta/types", aggregateRoutes::types);
-        app.get("/api/events/recent", aggregateRoutes::recentEvents);
+        // Metrics (4.1)
+        app.get("/api/v1/metrics", metricsRoutes::metrics);
 
-        // Timeline / replay
-        app.get("/api/aggregates/{id}/timeline", timelineRoutes::getTimeline);
-        app.get("/api/aggregates/{id}/replay", timelineRoutes::replay);
-        app.get("/api/aggregates/{id}/replay/{seq}", timelineRoutes::replayTo);
-        app.get("/api/aggregates/{id}/transitions", timelineRoutes::transitions);
+        // OpenAPI (5.2)
+        app.get("/api/v1/openapi.json", openApiRoutes::spec);
 
-        // Bisect
-        app.post("/api/aggregates/{id}/bisect", bisectRoutes::bisect);
+        // Aggregates (v1)
+        app.get("/api/v1/aggregates/search", aggregateRoutes::search);
+        app.get("/api/v1/meta/types", aggregateRoutes::types);
+        app.get("/api/v1/events/recent", aggregateRoutes::recentEvents);
 
-        // Anomalies
-        app.get("/api/aggregates/{id}/anomalies", anomalyRoutes::scanAggregate);
-        app.get("/api/anomalies/recent", anomalyRoutes::scanRecent);
+        // Legacy aggregate routes (no redirect, but marked deprecated)
+        app.get("/api/aggregates/search", ctx -> {
+            markDeprecated(ctx, "/api/v1/aggregates/search");
+            aggregateRoutes.search(ctx);
+        });
+        app.get("/api/meta/types", ctx -> {
+            markDeprecated(ctx, "/api/v1/meta/types");
+            aggregateRoutes.types(ctx);
+        });
+        app.get("/api/events/recent", ctx -> {
+            markDeprecated(ctx, "/api/v1/events/recent");
+            aggregateRoutes.recentEvents(ctx);
+        });
 
-        // Export
-        app.get("/api/aggregates/{id}/export", exportRoutes::export);
+        // Timeline / replay (v1)
+        app.get("/api/v1/aggregates/{id}/timeline", timelineRoutes::getTimeline);
+        app.get("/api/v1/aggregates/{id}/replay", timelineRoutes::replay);
+        app.get("/api/v1/aggregates/{id}/replay/{seq}", timelineRoutes::replayTo);
+        app.get("/api/v1/aggregates/{id}/transitions", timelineRoutes::transitions);
 
-        // Async Export (2.6)
-        app.post("/api/events/export", asyncExportRoutes::start);
-        app.get("/api/events/export/{exportId}", asyncExportRoutes::status);
-        app.get("/api/events/export/{exportId}/download", asyncExportRoutes::download);
+        // Legacy timeline / replay routes
+        app.get("/api/aggregates/{id}/timeline", ctx -> {
+            markDeprecated(ctx, "/api/v1/aggregates/" + ctx.pathParam("id") + "/timeline");
+            timelineRoutes.getTimeline(ctx);
+        });
+        app.get("/api/aggregates/{id}/replay", ctx -> {
+            markDeprecated(ctx, "/api/v1/aggregates/" + ctx.pathParam("id") + "/replay");
+            timelineRoutes.replay(ctx);
+        });
+        app.get("/api/aggregates/{id}/replay/{seq}", ctx -> {
+            markDeprecated(ctx, "/api/v1/aggregates/" + ctx.pathParam("id") + "/replay/" + ctx.pathParam("seq"));
+            timelineRoutes.replayTo(ctx);
+        });
+        app.get("/api/aggregates/{id}/transitions", ctx -> {
+            markDeprecated(ctx, "/api/v1/aggregates/" + ctx.pathParam("id") + "/transitions");
+            timelineRoutes.transitions(ctx);
+        });
+
+        // Bisect (v1 + legacy)
+        app.post("/api/v1/aggregates/{id}/bisect", bisectRoutes::bisect);
+        app.post("/api/aggregates/{id}/bisect", ctx -> {
+            markDeprecated(ctx, "/api/v1/aggregates/" + ctx.pathParam("id") + "/bisect");
+            bisectRoutes.bisect(ctx);
+        });
+
+        // Anomalies (v1)
+        app.get("/api/v1/aggregates/{id}/anomalies", anomalyRoutes::scanAggregate);
+        app.get("/api/v1/anomalies/recent", anomalyRoutes::scanRecent);
+
+        // Legacy Anomalies
+        app.get("/api/aggregates/{id}/anomalies", ctx -> {
+            markDeprecated(ctx, "/api/v1/aggregates/" + ctx.pathParam("id") + "/anomalies");
+            anomalyRoutes.scanAggregate(ctx);
+        });
+        app.get("/api/anomalies/recent", ctx -> {
+            markDeprecated(ctx, "/api/v1/anomalies/recent");
+            anomalyRoutes.scanRecent(ctx);
+        });
+
+        // Export (v1 + legacy)
+        app.get("/api/v1/aggregates/{id}/export", exportRoutes::export);
+        app.get("/api/aggregates/{id}/export", ctx -> {
+            markDeprecated(ctx, "/api/v1/aggregates/" + ctx.pathParam("id") + "/export");
+            exportRoutes.export(ctx);
+        });
+
+        // Async Export (2.6) — v1 + legacy
+        app.post("/api/v1/events/export", asyncExportRoutes::start);
+        app.get("/api/v1/events/export/{exportId}", asyncExportRoutes::status);
+        app.get("/api/v1/events/export/{exportId}/download", asyncExportRoutes::download);
+
+        app.post("/api/events/export", ctx -> {
+            markDeprecated(ctx, "/api/v1/events/export");
+            asyncExportRoutes.start(ctx);
+        });
+        app.get("/api/events/export/{exportId}", ctx -> {
+            markDeprecated(ctx, "/api/v1/events/export/" + ctx.pathParam("exportId"));
+            asyncExportRoutes.status(ctx);
+        });
+        app.get("/api/events/export/{exportId}/download", ctx -> {
+            markDeprecated(ctx, "/api/v1/events/export/" + ctx.pathParam("exportId") + "/download");
+            asyncExportRoutes.download(ctx);
+        });
 
         // WebSocket live tail
         liveTailWs.configure(app);
@@ -331,6 +431,12 @@ public class EventLensServer {
 
     public Javalin getApp() {
         return app;
+    }
+
+    private static void markDeprecated(io.javalin.http.Context ctx, String successor) {
+        ctx.header("Deprecation", "true");
+        ctx.header("Sunset", "2026-01-01");
+        ctx.header("Link", "<" + successor + ">; rel=\"successor-version\"");
     }
 
     private static String extractClientIp(io.javalin.http.Context ctx) {

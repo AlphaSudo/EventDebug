@@ -8,6 +8,7 @@ import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.Javalin;
 import io.javalin.websocket.WsContext;
+import io.eventlens.api.metrics.EventLensMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -69,6 +70,7 @@ public class LiveTailWebSocket {
                 }
                 ctx.enableAutomaticPings(15, TimeUnit.SECONDS);
                 sessions.add(ctx);
+                EventLensMetrics.setWebsocketConnections(sessions.size());
                 log.debug("WebSocket client connected: {} ({} active)", ctx.sessionId(), sessions.size());
 
                 // 1.8 — audit live-stream connection
@@ -90,11 +92,13 @@ public class LiveTailWebSocket {
 
             ws.onClose(ctx -> {
                 sessions.remove(ctx);
+                EventLensMetrics.setWebsocketConnections(sessions.size());
                 log.debug("WebSocket client disconnected: {}", ctx.sessionId());
             });
 
             ws.onError(ctx -> {
                 sessions.remove(ctx);
+                EventLensMetrics.setWebsocketConnections(sessions.size());
                 log.debug("WebSocket error for session: {}", ctx.sessionId());
             });
         });

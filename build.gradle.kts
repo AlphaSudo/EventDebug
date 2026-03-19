@@ -14,6 +14,9 @@ val junitVersion        = "6.0.3"
 val assertjVersion      = "3.27.7"
 val testcontainersVersion = "1.20.1"
 val caffeineVersion     = "3.1.8"
+val micrometerVersion   = "1.15.0"
+val logstashEncoderVersion = "8.1"
+val janinoVersion       = "3.1.12"
 
 allprojects {
     group   = "io.eventlens"
@@ -49,6 +52,9 @@ subprojects {
     dependencies {
         // Logging â€” every module gets SLF4J API
         "implementation"("org.slf4j:slf4j-api:$slf4jVersion")
+        // Structured JSON logging support (logback conditional config + encoder)
+        "runtimeOnly"("net.logstash.logback:logstash-logback-encoder:$logstashEncoderVersion")
+        "runtimeOnly"("org.codehaus.janino:janino:$janinoVersion")
 
         // Test
         "testImplementation"("org.junit.jupiter:junit-jupiter:$junitVersion")
