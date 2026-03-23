@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { FieldChange } from '../api/client';
 
 interface Props {
@@ -11,21 +11,8 @@ export default function StateDiff({ diff }: Props) {
     const entries = Object.entries(diff);
     const hasDiff = entries.length > 0;
     const [mode, setMode] = useState<ViewMode>('inline');
-    const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
-    const scrollerRef = useRef<HTMLDivElement>(null);
 
     if (!hasDiff) return null;
-
-    const showMinimap = entries.length > 5;
-
-    const scrollToRow = (i: number) => {
-        rowRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    };
-
-    const jumpToNext = (currentIdx: number) => {
-        const next = (currentIdx + 1) % entries.length;
-        scrollToRow(next);
-    };
 
     return (
         <div className="diff-panel">
@@ -54,29 +41,14 @@ export default function StateDiff({ diff }: Props) {
 
             {/* Inline / split modes */}
             <div className="diff-body">
-                    {showMinimap && (
-                        <div className="diff-minimap" title="Jump to change">
-                            {entries.map((_, i) => (
-                                <button
-                                    key={i}
-                                    type="button"
-                                    className="diff-minimap-chunk"
-                                    onClick={() => scrollToRow(i)}
-                                    aria-label={`Change ${i + 1} of ${entries.length}`}
-                                />
-                            ))}
-                        </div>
-                    )}
 
-                    <div className="diff-scroll" ref={scrollerRef}>
+                    <div className="diff-scroll">
                         {mode === 'inline' ? (
                             <div className="diff-list diff-list-inline">
                                 {entries.map(([field, change], i) => (
                                     <div
                                         key={field}
-                                        ref={el => { rowRefs.current[i] = el; }}
                                         className="diff-row"
-                                        data-diff-index={i}
                                     >
                                         <span className="diff-line-no" aria-hidden>{i + 1}</span>
                                         <div className="diff-row-body">
@@ -86,15 +58,6 @@ export default function StateDiff({ diff }: Props) {
                                                 <span className="diff-arrow">→</span>
                                                 <span className="diff-new">{JSON.stringify(change.newValue)}</span>
                                             </span>
-                                            <button
-                                                type="button"
-                                                className="diff-jump-next"
-                                                onClick={() => jumpToNext(i)}
-                                                title="Jump to next change"
-                                                aria-label="Jump to next change"
-                                            >
-                                                ↓ next
-                                            </button>
                                         </div>
                                     </div>
                                 ))}
@@ -108,9 +71,7 @@ export default function StateDiff({ diff }: Props) {
                                 {entries.map(([field, change], i) => (
                                     <div
                                         key={field}
-                                        ref={el => { rowRefs.current[i] = el; }}
                                         className="diff-split-row"
-                                        data-diff-index={i}
                                     >
                                         <span className="diff-line-no" aria-hidden>{i + 1}</span>
                                         <div className="diff-split-cells">
