@@ -5,14 +5,29 @@ export type WebSocketStatus = 'connecting' | 'connected' | 'disconnected';
 const INITIAL_RECONNECT_MS = 1000;
 const MAX_RECONNECT_MS = 30000;
 
-export function useWebSocket<T = unknown>(path: string, onMessage: (data: T) => void) {
-    const [status, setStatus] = useState<WebSocketStatus>('connecting');
+export type UseWebSocketOptions = {
+    /** When false, no socket is opened (e.g. frontend demo mode). */
+    enabled?: boolean;
+};
+
+export function useWebSocket<T = unknown>(
+    path: string,
+    onMessage: (data: T) => void,
+    options?: UseWebSocketOptions
+) {
+    const enabled = options?.enabled ?? true;
+    const [status, setStatus] = useState<WebSocketStatus>(() => (enabled ? 'connecting' : 'connected'));
     const wsRef = useRef<WebSocket | null>(null);
     const onMessageRef = useRef(onMessage);
     const reconnectDelayRef = useRef(INITIAL_RECONNECT_MS);
     onMessageRef.current = onMessage;
 
     useEffect(() => {
+        if (!enabled) {
+            setStatus('connected');
+            return () => {};
+        }
+
         let closed = false;
         let timeoutId: ReturnType<typeof setTimeout>;
 
@@ -52,7 +67,7 @@ export function useWebSocket<T = unknown>(path: string, onMessage: (data: T) => 
             clearTimeout(timeoutId);
             wsRef.current?.close();
         };
-    }, [path]);
+    }, [path, enabled]);
 
     return status;
 }

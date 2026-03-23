@@ -17,6 +17,7 @@
 # Node / frontend
 eventlens-ui/node_modules/
 eventlens-ui/.vite/
+eventlens-ui/.env.development.local
 
 # TypeScript incremental build caches
 *.tsbuildinfo
@@ -27,6 +28,7 @@ eventlens-ui/.vite/
 .vscode/
 .DS_Store
 Thumbs.db
+.cursor/
 
 # Runtime logs and debug dumps
 logs/
@@ -42,3 +44,9 @@ eventlens.yaml
 # Local AI agent rules / dev tooling config
 .agents/
 .gemini/
+
+#personal files
+tests/
+versions/
+loadtests/
+plans/

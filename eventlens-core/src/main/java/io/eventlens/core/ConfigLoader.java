@@ -2,7 +2,12 @@ package io.eventlens.core;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import io.eventlens.core.exception.ConfigurationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,7 +48,7 @@ public class ConfigLoader {
             File file = new File(path);
             if (file.exists()) {
                 try {
-                    EventLensConfig config = YAML_MAPPER.readValue(file, EventLensConfig.class);
+                    EventLensConfig config = readAndInterpolate(file);
                     log.info("Loaded config from: {}", file.getAbsolutePath());
                     return config;
                 } catch (IOException e) {
@@ -64,11 +69,46 @@ public class ConfigLoader {
             throw new RuntimeException("Config file not found: " + path);
         }
         try {
-            EventLensConfig config = YAML_MAPPER.readValue(file, EventLensConfig.class);
+            EventLensConfig config = readAndInterpolate(file);
             log.info("Loaded config from: {}", file.getAbsolutePath());
             return config;
         } catch (IOException e) {
             throw new RuntimeException("Failed to parse config: " + path, e);
+        }
+    }
+
+    private static EventLensConfig readAndInterpolate(File file) throws IOException {
+        JsonNode root = YAML_MAPPER.readTree(file);
+        if (root == null) {
+            throw new ConfigurationException("Config file is empty: " + file.getAbsolutePath());
+        }
+        interpolateNode(root);
+        return YAML_MAPPER.treeToValue(root, EventLensConfig.class);
+    }
+
+    private static void interpolateNode(JsonNode node) {
+        if (node == null) return;
+
+        if (node.isObject()) {
+            ObjectNode obj = (ObjectNode) node;
+            for (var e : obj.properties()) {
+                JsonNode child = e.getValue();
+                if (child != null && child.isTextual()) {
+                    obj.set(e.getKey(), TextNode.valueOf(EnvInterpolator.interpolate(child.asText())));
+                } else {
+                    interpolateNode(child);
+                }
+            }
+        } else if (node.isArray()) {
+            ArrayNode arr = (ArrayNode) node;
+            for (int i = 0; i < arr.size(); i++) {
+                JsonNode child = arr.get(i);
+                if (child != null && child.isTextual()) {
+                    arr.set(i, TextNode.valueOf(EnvInterpolator.interpolate(child.asText())));
+                } else {
+                    interpolateNode(child);
+                }
+            }
         }
     }
 }

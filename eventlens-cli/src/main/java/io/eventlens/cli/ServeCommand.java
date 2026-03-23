@@ -2,10 +2,13 @@ package io.eventlens.cli;
 
 import io.eventlens.api.EventLensServer;
 import io.eventlens.api.websocket.LiveTailWebSocket;
+import io.eventlens.core.ConfigValidator;
 import io.eventlens.core.ConfigLoader;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.aggregator.*;
+import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.*;
+import io.eventlens.core.spi.ResilientEventStoreReader;
 import io.eventlens.kafka.*;
 import io.eventlens.pg.*;
 import org.slf4j.Logger;
@@ -63,14 +66,19 @@ public class ServeCommand implements Runnable {
         if (tableName != null)
             config.getDatasource().setTable(tableName);
 
+        ConfigValidator.validateOrThrow(config);
+
         var pgConfig = new PgConfig(
                 config.getDatasource().getUrl(),
                 config.getDatasource().getUsername(),
                 config.getDatasource().getPassword(),
                 config.getDatasource().getTable(),
-                config.getDatasource().getColumns()); // Fix 1: pass column overrides
+                config.getDatasource().getColumns(), // Fix 1: pass column overrides
+                config.getDatasource().getPool(),
+                config.getDatasource().getQueryTimeoutSeconds());
 
-        var reader = new PgEventStoreReader(pgConfig);
+        var rawReader = new PgEventStoreReader(pgConfig);
+        var reader = new ResilientEventStoreReader(rawReader);
         var registry = new ReducerRegistry();
 
         // Load custom reducers from classpath JARs
@@ -103,22 +111,17 @@ public class ServeCommand implements Runnable {
 
         var server = new EventLensServer(config, reader, replayEngine,
                 bisectEngine, anomalyDetector, exportEngine, diffEngine);
-        var liveTail = new LiveTailWebSocket(reader);
-        liveTail.configure(server.getApp());
+        // LiveTailWebSocket is wired and configured inside EventLensServer (v2).
+        // We still need a reference here for Kafka listener wiring.
+        var auditLogger = new AuditLogger(config.getAudit().isEnabled());
+        var liveTail = new LiveTailWebSocket(reader, auditLogger);
 
-        final KafkaLiveTail kafkaToClose = kafkaTail;
         if (kafkaTail != null) {
             kafkaTail.addListener(liveTail::broadcast);
             kafkaTail.start();
         } else {
             liveTail.startPolling();
         }
-
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            server.stop();
-            if (kafkaToClose != null) kafkaToClose.close();
-            reader.close();
-        }, "eventlens-shutdown"));
 
         server.start();
 

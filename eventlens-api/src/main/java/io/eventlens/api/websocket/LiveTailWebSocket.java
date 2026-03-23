@@ -2,13 +2,17 @@ package io.eventlens.api.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import io.eventlens.core.audit.AuditEvent;
+import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.spi.EventStoreReader;
-import io.javalin.Javalin;
+import io.javalin.websocket.WsConfig;
 import io.javalin.websocket.WsContext;
+import io.eventlens.api.metrics.EventLensMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -27,65 +31,86 @@ import java.util.concurrent.atomic.AtomicLong;
  * </ul>
  *
  * <p>
- * On connect: sends the last 20 events as backfill so clients don't join a
+ * On connect: sends the last N events as backfill so clients don't join a
  * blank screen. Backfill is sent asynchronously to avoid blocking the
  * Jetty onConnect handler thread.
+ *
+ * <p>v2 — emits {@link AuditEvent#ACTION_VIEW_LIVE_STREAM} on WebSocket
+ * connect (1.8 Audit Logging).
  */
 public class LiveTailWebSocket {
 
     private static final Logger log = LoggerFactory.getLogger(LiveTailWebSocket.class);
     private static final int MAX_CONNECTIONS = 500;
+    /** Recent events sent on each new WebSocket connection (was 20; too small vs total store count). */
+    private static final int BACKFILL_EVENT_COUNT = 100;
 
     private final Set<WsContext> sessions = ConcurrentHashMap.newKeySet();
     private final ObjectMapper mapper = new ObjectMapper()
             .findAndRegisterModules()
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     private final EventStoreReader reader;
+    private final AuditLogger      auditLogger;
     private final ExecutorService backfillExecutor = Executors.newCachedThreadPool(
             Thread.ofVirtual().name("eventlens-backfill-", 0).factory());
 
-    public LiveTailWebSocket(EventStoreReader reader) {
-        this.reader = reader;
+    public LiveTailWebSocket(EventStoreReader reader, AuditLogger auditLogger) {
+        this.reader      = reader;
+        this.auditLogger = auditLogger;
     }
 
     /**
-     * Register the WebSocket route and start polling (Kafka is wired externally).
+     * Set up WebSocket event handlers. The route itself is registered by
+     * the caller (EventLensServer) via {@code cfg.routes.ws("/ws/live", ...)}.
      */
-    public void configure(Javalin app) {
-        app.ws("/ws/live", ws -> {
-            ws.onConnect(ctx -> {
-                if (sessions.size() >= MAX_CONNECTIONS) {
-                    log.warn("WebSocket connection rejected: max connections ({}) reached", MAX_CONNECTIONS);
-                    ctx.session.close(1008, "Too many connections");
-                    return;
-                }
-                ctx.enableAutomaticPings(15, TimeUnit.SECONDS);
-                sessions.add(ctx);
-                log.debug("WebSocket client connected: {} ({} active)", ctx.sessionId(), sessions.size());
+    public void configureHandlers(WsConfig ws) {
+        ws.onConnect(ctx -> {
+            if (sessions.size() >= MAX_CONNECTIONS) {
+                log.warn("WebSocket connection rejected: max connections ({}) reached", MAX_CONNECTIONS);
+                ctx.closeSession(1008, "Too many connections");
+                return;
+            }
+            ctx.enableAutomaticPings();
+            sessions.add(ctx);
+            EventLensMetrics.setWebsocketConnections(sessions.size());
+            log.debug("WebSocket client connected: {} ({} active)", ctx.sessionId(), sessions.size());
 
-                backfillExecutor.submit(() -> backfill(ctx));
-            });
+            // 1.8 — audit live-stream connection
+            String userAgent = ctx.header("User-Agent");
+            auditLogger.log(AuditEvent.builder()
+                    .action(AuditEvent.ACTION_VIEW_LIVE_STREAM)
+                    .resourceType(AuditEvent.RT_STREAM)
+                    .userId("anonymous")          // WS upgrade doesn't carry the ctx attributes
+                    .authMethod("anonymous")
+                    .clientIp(extractIp(ctx))
+                    .requestId("ws-" + ctx.sessionId())
+                    .userAgent(userAgent)
+                    .details(Map.of("sessionId", ctx.sessionId(),
+                            "activeSessions", sessions.size()))
+                    .build());
 
-            ws.onClose(ctx -> {
-                sessions.remove(ctx);
-                log.debug("WebSocket client disconnected: {}", ctx.sessionId());
-            });
+            backfillExecutor.submit(() -> backfill(ctx));
+        });
 
-            ws.onError(ctx -> {
-                sessions.remove(ctx);
-                log.debug("WebSocket error for session: {}", ctx.sessionId());
-            });
+        ws.onClose(ctx -> {
+            sessions.remove(ctx);
+            EventLensMetrics.setWebsocketConnections(sessions.size());
+            log.debug("WebSocket client disconnected: {}", ctx.sessionId());
+        });
+
+        ws.onError(ctx -> {
+            sessions.remove(ctx);
+            EventLensMetrics.setWebsocketConnections(sessions.size());
+            log.debug("WebSocket error for session: {}", ctx.sessionId());
         });
     }
 
     private void backfill(WsContext ctx) {
         try {
             Thread.sleep(250);
-            if (!ctx.session.isOpen()) return;
-            var recent = reader.getRecentEvents(20);
+            var recent = reader.getRecentEvents(BACKFILL_EVENT_COUNT);
             for (var event : recent) {
-                if (!ctx.session.isOpen()) break;
-                trySend(ctx, event);
+                if (!trySend(ctx, event)) break;
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -98,10 +123,7 @@ public class LiveTailWebSocket {
     public void broadcast(StoredEvent event) {
         if (sessions.isEmpty())
             return;
-        sessions.removeIf(session -> {
-            if (!session.session.isOpen()) return true;
-            return !trySend(session, event);
-        });
+        sessions.removeIf(session -> !trySend(session, event));
     }
 
     /**
@@ -133,9 +155,10 @@ public class LiveTailWebSocket {
 
     /**
      * Non-throwing send. Returns true if the message was sent successfully.
+     * In Javalin 7 we no longer have direct access to the underlying session,
+     * so we rely on try-catch to detect disconnected clients.
      */
     private boolean trySend(WsContext ctx, StoredEvent event) {
-        if (!ctx.session.isOpen()) return false;
         try {
             ctx.send(mapper.writeValueAsString(event));
             return true;
@@ -143,5 +166,16 @@ public class LiveTailWebSocket {
             log.debug("WebSocket send failed for {}: {}", ctx.sessionId(), e.getMessage());
             return false;
         }
+    }
+
+    private static String extractIp(WsContext ctx) {
+        // WsContext exposes the underlying HTTP upgrade headers
+        String xff = ctx.header("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) {
+            int c = xff.indexOf(',');
+            return (c >= 0 ? xff.substring(0, c) : xff).trim();
+        }
+        String xri = ctx.header("X-Real-IP");
+        return xri != null && !xri.isBlank() ? xri.trim() : "unknown";
     }
 }

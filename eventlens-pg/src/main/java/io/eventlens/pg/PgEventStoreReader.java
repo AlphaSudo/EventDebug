@@ -3,6 +3,7 @@ package io.eventlens.pg;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import io.eventlens.core.EventLensConfig.ColumnMappingConfig;
+import io.eventlens.core.exception.QueryTimeoutException;
 import io.eventlens.core.exception.EventStoreException;
 import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.spi.EventStoreReader;
@@ -29,17 +30,29 @@ public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
 
     private final HikariDataSource dataSource;
     private final DetectedSchema schema;
+    private final int queryTimeoutSeconds;
 
     public PgEventStoreReader(PgConfig config) {
         HikariConfig hc = new HikariConfig();
         hc.setJdbcUrl(config.jdbcUrl());
         hc.setUsername(config.username());
         hc.setPassword(config.password());
-        hc.setMaximumPoolSize(5);
+        var pool = config.pool();
+        if (pool != null) {
+            hc.setMaximumPoolSize(pool.getMaximumPoolSize());
+            hc.setMinimumIdle(pool.getMinimumIdle());
+            hc.setConnectionTimeout(pool.getConnectionTimeoutMs());
+            hc.setIdleTimeout(pool.getIdleTimeoutMs());
+            hc.setMaxLifetime(pool.getMaxLifetimeMs());
+            hc.setLeakDetectionThreshold(pool.getLeakDetectionThresholdMs());
+        }
         hc.setReadOnly(true); // CRITICAL: read-only
-        hc.setConnectionTimeout(5_000);
+        if (pool == null) {
+            hc.setConnectionTimeout(5_000);
+        }
         hc.setPoolName("eventlens-pg");
         this.dataSource = new HikariDataSource(hc);
+        this.queryTimeoutSeconds = Math.max(1, config.queryTimeoutSeconds());
         log.info("Connected to PostgreSQL: {}", config.jdbcUrl());
 
         var detector = new PgSchemaDetector();
@@ -69,12 +82,47 @@ public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
                 table, aggCol, seqCol);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
             ps.setString(1, aggregateId);
             ps.setInt(2, limit);
             ps.setInt(3, offset);
             return mapResults(ps.executeQuery());
         } catch (SQLException e) {
+            if (isQueryCanceled(e)) {
+                throw new QueryTimeoutException(
+                        queryTimeoutSeconds,
+                        "Query exceeded %ds timeout. Consider narrowing your search or adding indexes."
+                                .formatted(queryTimeoutSeconds),
+                        e);
+            }
             throw new EventStoreException("Failed to read events for aggregate: " + aggregateId, e);
+        }
+    }
+
+    @Override
+    public List<StoredEvent> getEventsAfterSequence(String aggregateId, long afterSequence, int limit) {
+        String table = quoteIdentifier(schema.tableName());
+        String aggCol = quoteIdentifier(schema.aggregateIdColumn());
+        String seqCol = quoteIdentifier(schema.sequenceColumn());
+        String sql = String.format(
+                "SELECT * FROM %s WHERE %s = ? AND %s > ? ORDER BY %s ASC LIMIT ?",
+                table, aggCol, seqCol, seqCol);
+        try (Connection conn = dataSource.getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
+            ps.setString(1, aggregateId);
+            ps.setLong(2, afterSequence);
+            ps.setInt(3, limit);
+            return mapResults(ps.executeQuery());
+        } catch (SQLException e) {
+            if (isQueryCanceled(e)) {
+                throw new QueryTimeoutException(
+                        queryTimeoutSeconds,
+                        "Query exceeded %ds timeout. Consider narrowing your search or adding indexes."
+                                .formatted(queryTimeoutSeconds),
+                        e);
+            }
+            throw new EventStoreException("Failed to read events after sequence " + afterSequence + " for aggregate: " + aggregateId, e);
         }
     }
 
@@ -88,10 +136,18 @@ public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
                 table, aggCol, seqCol, seqCol);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
             ps.setString(1, aggregateId);
             ps.setLong(2, maxSequence);
             return mapResults(ps.executeQuery());
         } catch (SQLException e) {
+            if (isQueryCanceled(e)) {
+                throw new QueryTimeoutException(
+                        queryTimeoutSeconds,
+                        "Query exceeded %ds timeout. Consider narrowing your search or adding indexes."
+                                .formatted(queryTimeoutSeconds),
+                        e);
+            }
             throw new EventStoreException("Failed to read events up to sequence " + maxSequence, e);
         }
     }
@@ -115,6 +171,7 @@ public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
 
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
             if (schema.aggregateTypeColumn() != null) {
                 ps.setString(1, aggregateType);
                 ps.setInt(2, limit);
@@ -125,6 +182,13 @@ public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
             }
             return extractFirstColumn(ps.executeQuery());
         } catch (SQLException e) {
+            if (isQueryCanceled(e)) {
+                throw new QueryTimeoutException(
+                        queryTimeoutSeconds,
+                        "Query exceeded %ds timeout. Consider narrowing your search or adding indexes."
+                                .formatted(queryTimeoutSeconds),
+                        e);
+            }
             throw new EventStoreException("Failed to find aggregate IDs for type: " + aggregateType, e);
         }
     }
@@ -143,11 +207,19 @@ public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
                 table, orderColQ);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
             ps.setInt(1, limit);
             List<StoredEvent> results = mapResults(ps.executeQuery());
             Collections.reverse(results); // oldest first for display
             return results;
         } catch (SQLException e) {
+            if (isQueryCanceled(e)) {
+                throw new QueryTimeoutException(
+                        queryTimeoutSeconds,
+                        "Query exceeded %ds timeout. Consider narrowing your search or adding indexes."
+                                .formatted(queryTimeoutSeconds),
+                        e);
+            }
             throw new EventStoreException("Failed to read recent events", e);
         }
     }
@@ -164,10 +236,18 @@ public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
                 table, posColQ, posColQ);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
             ps.setLong(1, globalPosition);
             ps.setInt(2, limit);
             return mapResults(ps.executeQuery());
         } catch (SQLException e) {
+            if (isQueryCanceled(e)) {
+                throw new QueryTimeoutException(
+                        queryTimeoutSeconds,
+                        "Query exceeded %ds timeout. Consider narrowing your search or adding indexes."
+                                .formatted(queryTimeoutSeconds),
+                        e);
+            }
             throw new EventStoreException("Failed to poll events after position " + globalPosition, e);
         }
     }
@@ -181,10 +261,18 @@ public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
                 table, aggCol);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
             ps.setString(1, aggregateId);
             ResultSet rs = ps.executeQuery();
             return rs.next() ? rs.getLong(1) : 0;
         } catch (SQLException e) {
+            if (isQueryCanceled(e)) {
+                throw new QueryTimeoutException(
+                        queryTimeoutSeconds,
+                        "Query exceeded %ds timeout. Consider narrowing your search or adding indexes."
+                                .formatted(queryTimeoutSeconds),
+                        e);
+            }
             throw new EventStoreException("Failed to count events for: " + aggregateId, e);
         }
     }
@@ -200,8 +288,16 @@ public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
                 typeCol, table, typeCol);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
             return extractFirstColumn(ps.executeQuery());
         } catch (SQLException e) {
+            if (isQueryCanceled(e)) {
+                throw new QueryTimeoutException(
+                        queryTimeoutSeconds,
+                        "Query exceeded %ds timeout. Consider narrowing your search or adding indexes."
+                                .formatted(queryTimeoutSeconds),
+                        e);
+            }
             throw new EventStoreException("Failed to get aggregate types", e);
         }
     }
@@ -215,12 +311,24 @@ public class PgEventStoreReader implements EventStoreReader, AutoCloseable {
                 aggCol, table, aggCol, aggCol);
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
             ps.setString(1, "%" + query + "%");
             ps.setInt(2, limit);
             return extractFirstColumn(ps.executeQuery());
         } catch (SQLException e) {
+            if (isQueryCanceled(e)) {
+                throw new QueryTimeoutException(
+                        queryTimeoutSeconds,
+                        "Query exceeded %ds timeout. Consider narrowing your search or adding indexes."
+                                .formatted(queryTimeoutSeconds),
+                        e);
+            }
             throw new EventStoreException("Failed to search aggregates", e);
         }
+    }
+
+    private static boolean isQueryCanceled(SQLException e) {
+        return "57014".equals(e.getSQLState());
     }
 
     public void close() {

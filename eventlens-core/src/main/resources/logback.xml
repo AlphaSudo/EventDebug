@@ -1,10 +1,30 @@
 <configuration>
 
-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} — %msg%n</pattern>
-        </encoder>
-    </appender>
+    <!-- 4.2 Structured JSON Logging -->
+    <property name="LOG_FORMAT" value="${LOG_FORMAT:-json}"/>
+    <property name="LOG_LEVEL" value="${LOG_LEVEL:-INFO}"/>
+
+    <if condition='p("LOG_FORMAT").equals("json")'>
+        <then>
+            <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+                <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                    <includeMdcKeyName>requestId</includeMdcKeyName>
+                    <includeMdcKeyName>userId</includeMdcKeyName>
+                    <includeMdcKeyName>clientIp</includeMdcKeyName>
+                    <includeMdcKeyName>method</includeMdcKeyName>
+                    <includeMdcKeyName>path</includeMdcKeyName>
+                    <customFields>{"service":"eventlens"}</customFields>
+                </encoder>
+            </appender>
+        </then>
+        <else>
+            <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+                <encoder>
+                    <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%mdc] - %msg%n</pattern>
+                </encoder>
+            </appender>
+        </else>
+    </if>
 
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/eventlens.log</file>
@@ -13,10 +33,38 @@
             <maxHistory>7</maxHistory>
             <totalSizeCap>500MB</totalSizeCap>
         </rollingPolicy>
-        <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{40} — %msg%n</pattern>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdcKeyName>requestId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
+            <includeMdcKeyName>clientIp</includeMdcKeyName>
+            <includeMdcKeyName>method</includeMdcKeyName>
+            <includeMdcKeyName>path</includeMdcKeyName>
+            <customFields>{"service":"eventlens"}</customFields>
         </encoder>
     </appender>
+
+    <!--
+        1.8 AUDIT LOGGING
+        Dedicated rolling file for structured audit entries (one JSON object per
+        line).  additivity=false keeps audit records out of the main log file.
+        Retained for 90 days, capped at 1 GB total.
+    -->
+    <appender name="AUDIT" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/audit.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/audit.%d{yyyy-MM-dd}.log.gz</fileNamePattern>
+            <maxHistory>90</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+        <!-- Plain encoder — AuditLogger already serialises the message to JSON -->
+        <encoder>
+            <pattern>%msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="eventlens.audit" level="INFO" additivity="false">
+        <appender-ref ref="AUDIT"/>
+    </logger>
 
     <!-- Reduce noise from libraries -->
     <logger name="com.zaxxer.hikari" level="WARN"/>
@@ -26,7 +74,7 @@
     <!-- EventLens own code -->
     <logger name="io.eventlens" level="DEBUG"/>
 
-    <root level="INFO">
+    <root level="${LOG_LEVEL}">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
     </root>

@@ -1,0 +1,210 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "EventLens API",
+    "version": "2.0.0",
+    "description": "Read-only event store debugger and timeline explorer",
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:9090/api/v1",
+      "description": "Local development"
+    }
+  ],
+  "paths": {
+    "/aggregates/search": {
+      "get": {
+        "operationId": "searchAggregates",
+        "summary": "Search aggregates by ID prefix",
+        "tags": ["Aggregates"],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching aggregate IDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/aggregates/{aggregateId}/timeline": {
+      "get": {
+        "operationId": "getTimeline",
+        "summary": "Get event timeline for an aggregate",
+        "tags": ["Events"],
+        "parameters": [
+          {
+            "name": "aggregateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9\\-_]{1,255}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 500
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Opaque cursor from previous response"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Timeline events",
+            "headers": {
+              "ETag": { "schema": { "type": "string" } },
+              "X-Request-Id": { "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TimelineResponse" }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/events/recent": {
+      "get": {
+        "operationId": "getRecentEvents",
+        "summary": "Get recent events across all aggregates",
+        "tags": ["Events"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/StoredEvent" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "StoredEvent": {
+        "type": "object",
+        "properties": {
+          "eventId": { "type": "string" },
+          "aggregateId": { "type": "string" },
+          "aggregateType": { "type": "string" },
+          "sequenceNumber": { "type": "integer", "format": "int64" },
+          "eventType": { "type": "string" },
+          "payload": { "type": "string" },
+          "metadata": { "type": "string" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "globalPosition": { "type": "integer", "format": "int64" }
+        },
+        "required": [
+          "eventId",
+          "aggregateId",
+          "aggregateType",
+          "sequenceNumber",
+          "eventType",
+          "payload",
+          "timestamp"
+        ]
+      },
+      "TimelineResponse": {
+        "type": "object",
+        "properties": {
+          "aggregateId": { "type": "string" },
+          "aggregateType": { "type": "string" },
+          "events": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/StoredEvent" }
+          },
+          "totalEvents": { "type": "integer" },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "limit": { "type": "integer" },
+              "hasMore": { "type": "boolean" },
+              "nextCursor": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "RateLimited": {
+        "description": "Too many requests",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": { "type": "string" },
+                "message": { "type": "string" },
+                "retryAfterSeconds": { "type": "integer" }
+              }
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "Service temporarily unavailable"
+      }
+    }
+  }
+}
+

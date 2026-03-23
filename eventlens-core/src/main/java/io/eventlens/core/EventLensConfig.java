@@ -1,5 +1,6 @@
 package io.eventlens.core;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -14,6 +15,10 @@ public class EventLensConfig {
     private ReplayConfig replay = new ReplayConfig();
     private AnomalyConfig anomaly = new AnomalyConfig();
     private UiConfig ui = new UiConfig();
+    private AuditConfig audit = new AuditConfig();
+    private DataProtectionConfig dataProtection = new DataProtectionConfig();
+    private ExportConfig export = new ExportConfig();
+    private String version = "2.0.0";
 
     // ── Getters / Setters ──────────────────────────────────────────────
 
@@ -65,12 +70,46 @@ public class EventLensConfig {
         this.ui = u;
     }
 
+    public AuditConfig getAudit() {
+        return audit;
+    }
+
+    public void setAudit(AuditConfig a) {
+        this.audit = a;
+    }
+
+    public DataProtectionConfig getDataProtection() {
+        return dataProtection;
+    }
+
+    public void setDataProtection(DataProtectionConfig dp) {
+        this.dataProtection = dp;
+    }
+
+    public ExportConfig getExport() {
+        return export;
+    }
+
+    public void setExport(ExportConfig export) {
+        this.export = export;
+    }
+
+    public String getVersion() {
+        return version;
+    }
+
+    public void setVersion(String version) {
+        this.version = version;
+    }
+
     // ── Nested configs ─────────────────────────────────────────────────
 
     public static class ServerConfig {
         private int port = 9090;
         private List<String> allowedOrigins = List.of("http://localhost:5173", "http://localhost:9090");
         private AuthConfig auth = new AuthConfig();
+        private SecurityConfig security = new SecurityConfig();
+        private int corsMaxAgeSeconds = 600;
 
         public int getPort() {
             return port;
@@ -94,6 +133,22 @@ public class EventLensConfig {
 
         public void setAuth(AuthConfig auth) {
             this.auth = auth;
+        }
+
+        public SecurityConfig getSecurity() {
+            return security;
+        }
+
+        public void setSecurity(SecurityConfig security) {
+            this.security = security;
+        }
+
+        public int getCorsMaxAgeSeconds() {
+            return corsMaxAgeSeconds;
+        }
+
+        public void setCorsMaxAgeSeconds(int corsMaxAgeSeconds) {
+            this.corsMaxAgeSeconds = corsMaxAgeSeconds;
         }
     }
 
@@ -127,12 +182,56 @@ public class EventLensConfig {
         }
     }
 
+    public static class SecurityConfig {
+        private RateLimitConfig rateLimit = new RateLimitConfig();
+
+        public RateLimitConfig getRateLimit() {
+            return rateLimit;
+        }
+
+        public void setRateLimit(RateLimitConfig rateLimit) {
+            this.rateLimit = rateLimit;
+        }
+    }
+
+    public static class RateLimitConfig {
+        private boolean enabled = false;
+        private int requestsPerMinute = 120;
+        private int burst = 20;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getRequestsPerMinute() {
+            return requestsPerMinute;
+        }
+
+        public void setRequestsPerMinute(int requestsPerMinute) {
+            this.requestsPerMinute = requestsPerMinute;
+        }
+
+        public int getBurst() {
+            return burst;
+        }
+
+        public void setBurst(int burst) {
+            this.burst = burst;
+        }
+    }
+
     public static class DatasourceConfig {
         private String url = "jdbc:postgresql://localhost:5432/eventlens_dev";
         private String username = "postgres";
         private String password = "";
         private String table; // null = auto-detect
         private ColumnMappingConfig columns = new ColumnMappingConfig();
+        private PoolConfig pool = new PoolConfig();
+        private int queryTimeoutSeconds = 30;
 
         public String getUrl() {
             return url;
@@ -172,6 +271,120 @@ public class EventLensConfig {
 
         public void setColumns(ColumnMappingConfig columns) {
             this.columns = columns;
+        }
+
+        public PoolConfig getPool() {
+            return pool;
+        }
+
+        public void setPool(PoolConfig pool) {
+            this.pool = pool;
+        }
+
+        public int getQueryTimeoutSeconds() {
+            return queryTimeoutSeconds;
+        }
+
+        public void setQueryTimeoutSeconds(int queryTimeoutSeconds) {
+            this.queryTimeoutSeconds = queryTimeoutSeconds;
+        }
+    }
+
+    public static class PoolConfig {
+        private int maximumPoolSize = 10;
+        private int minimumIdle = 2;
+        private long connectionTimeoutMs = 5_000;
+        private long idleTimeoutMs = 300_000;
+        private long maxLifetimeMs = 900_000;
+        private long leakDetectionThresholdMs = 30_000;
+
+        public int getMaximumPoolSize() {
+            return maximumPoolSize;
+        }
+
+        public void setMaximumPoolSize(int maximumPoolSize) {
+            this.maximumPoolSize = maximumPoolSize;
+        }
+
+        public int getMinimumIdle() {
+            return minimumIdle;
+        }
+
+        public void setMinimumIdle(int minimumIdle) {
+            this.minimumIdle = minimumIdle;
+        }
+
+        public long getConnectionTimeoutMs() {
+            return connectionTimeoutMs;
+        }
+
+        public void setConnectionTimeoutMs(long connectionTimeoutMs) {
+            this.connectionTimeoutMs = connectionTimeoutMs;
+        }
+
+        public long getIdleTimeoutMs() {
+            return idleTimeoutMs;
+        }
+
+        public void setIdleTimeoutMs(long idleTimeoutMs) {
+            this.idleTimeoutMs = idleTimeoutMs;
+        }
+
+        public long getMaxLifetimeMs() {
+            return maxLifetimeMs;
+        }
+
+        public void setMaxLifetimeMs(long maxLifetimeMs) {
+            this.maxLifetimeMs = maxLifetimeMs;
+        }
+
+        public long getLeakDetectionThresholdMs() {
+            return leakDetectionThresholdMs;
+        }
+
+        public void setLeakDetectionThresholdMs(long leakDetectionThresholdMs) {
+            this.leakDetectionThresholdMs = leakDetectionThresholdMs;
+        }
+    }
+
+    // ── 2.6 Async Export ─────────────────────────────────────────────────
+
+    public static class ExportConfig {
+        private String directory = "./exports";
+        private int maxConcurrent = 2;
+        private int maxEventsPerExport = 100_000;
+        private int expireAfterSeconds = 3_600;
+
+        public String getDirectory() {
+            return directory;
+        }
+
+        public void setDirectory(String directory) {
+            this.directory = directory;
+        }
+
+        public int getMaxConcurrent() {
+            return maxConcurrent;
+        }
+
+        public void setMaxConcurrent(int maxConcurrent) {
+            this.maxConcurrent = maxConcurrent;
+        }
+
+        public int getMaxEventsPerExport() {
+            return maxEventsPerExport;
+        }
+
+        public void setMaxEventsPerExport(int maxEventsPerExport) {
+            this.maxEventsPerExport = maxEventsPerExport;
+        }
+
+        public int getExpireAfterSeconds() {
+            return expireAfterSeconds;
+        }
+
+        public void setExpireAfterSeconds(int expireAfterSeconds) {
+            this.expireAfterSeconds = expireAfterSeconds;
         }
     }
 
@@ -413,5 +626,97 @@ public class EventLensConfig {
         public void setTheme(String theme) {
             this.theme = theme;
         }
+    }
+
+    // ── 1.8 Audit Logging ───────────────────────────────────────────────
+
+    public static class AuditConfig {
+        /** Enable writing structured audit entries to logs/audit.log. */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
+
+    // ── 1.9 PII Masking ─────────────────────────────────────────────────
+
+    public static class DataProtectionConfig {
+        private PiiConfig pii = new PiiConfig();
+
+        public PiiConfig getPii() {
+            return pii;
+        }
+
+        public void setPii(PiiConfig pii) {
+            this.pii = pii;
+        }
+    }
+
+    public static class PiiConfig {
+        /** Enable PII masking on event payloads in API responses. */
+        private boolean enabled = false;
+        private List<PiiPatternConfig> patterns = defaultPatterns();
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public List<PiiPatternConfig> getPatterns() {
+            return patterns;
+        }
+
+        public void setPatterns(List<PiiPatternConfig> patterns) {
+            this.patterns = patterns;
+        }
+
+        private static List<PiiPatternConfig> defaultPatterns() {
+            var list = new ArrayList<PiiPatternConfig>();
+            list.add(new PiiPatternConfig("email",
+                    "[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}",
+                    "***@***.***"));
+            list.add(new PiiPatternConfig("credit-card",
+                    "\\b\\d{4}[- ]?\\d{4}[- ]?\\d{4}[- ]?\\d{4}\\b",
+                    "****-****-****-****"));
+            list.add(new PiiPatternConfig("phone",
+                    "\\+?[1-9]\\d{7,14}",
+                    "***-***-****"));
+            list.add(new PiiPatternConfig("ssn",
+                    "\\d{3}-\\d{2}-\\d{4}",
+                    "***-**-****"));
+            return list;
+        }
+    }
+
+    public static class PiiPatternConfig {
+        private String name;
+        private String regex;
+        private String mask;
+
+        /** No-arg constructor required by SnakeYAML / Jackson. */
+        public PiiPatternConfig() {}
+
+        public PiiPatternConfig(String name, String regex, String mask) {
+            this.name  = name;
+            this.regex = regex;
+            this.mask  = mask;
+        }
+
+        public String getName()  { return name; }
+        public void setName(String name) { this.name = name; }
+
+        public String getRegex() { return regex; }
+        public void setRegex(String regex) { this.regex = regex; }
+
+        public String getMask()  { return mask; }
+        public void setMask(String mask) { this.mask = mask; }
     }
 }

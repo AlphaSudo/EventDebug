@@ -53,19 +53,16 @@ class KafkaLiveTailTest {
             tail.addListener(received::add);
             tail.start();
 
-            // Give the consumer a moment to subscribe before producing
-            Thread.sleep(1000);
-
-            // Produce a couple of minimal-format events
-            producer.send(new ProducerRecord<>(topic, "ACC-001",
-                    "{\"eventType\":\"AccountCreated\",\"payload\":{\"balance\":0}}")).get();
-            producer.send(new ProducerRecord<>(topic, "ACC-001",
-                    "{\"eventType\":\"MoneyDeposited\",\"payload\":{\"amount\":50}}")).get();
-
-            // Wait briefly for consumption
+            // The LiveTail consumer uses auto.offset.reset="latest". 
+            // We must wait until it has fully joined the group before our produced messages
+            // will be caught. To avoid fragile sleeps, produce repeatedly until we get them.
             long start = System.currentTimeMillis();
-            while (received.size() < 2 && System.currentTimeMillis() - start < 20_000) {
-                Thread.sleep(200);
+            while (received.size() < 2 && System.currentTimeMillis() - start < 30_000) {
+                producer.send(new ProducerRecord<>(topic, "ACC-001",
+                        "{\"eventType\":\"AccountCreated\",\"payload\":{\"balance\":0}}")).get();
+                producer.send(new ProducerRecord<>(topic, "ACC-001",
+                        "{\"eventType\":\"MoneyDeposited\",\"payload\":{\"amount\":50}}")).get();
+                Thread.sleep(1000);
             }
         }
 

@@ -80,6 +80,39 @@ public class ReplayEngine {
         return new AggregateTimeline(aggregateId, aggregateType, events, (int) Math.min(Integer.MAX_VALUE, total));
     }
 
+    /**
+     * Keyset pagination timeline: returns events strictly after {@code afterSequence}.
+     * Fetches one extra row to determine {@code hasMore} without a second query.
+     */
+    public TimelinePage buildTimelineAfter(String aggregateId, int limit, long afterSequence) {
+        int safeLimit = Math.max(1, limit);
+        List<StoredEvent> batchPlusOne = reader.getEventsAfterSequence(aggregateId, afterSequence, safeLimit + 1);
+        boolean hasMore = batchPlusOne.size() > safeLimit;
+        List<StoredEvent> events = hasMore ? batchPlusOne.subList(0, safeLimit) : batchPlusOne;
+
+        long total = reader.countEvents(aggregateId);
+        String aggregateType = events.isEmpty() ? "unknown" : events.getFirst().aggregateType();
+
+        long nextAfter = events.isEmpty() ? afterSequence : events.getLast().sequenceNumber();
+        return new TimelinePage(
+                aggregateId,
+                aggregateType,
+                events,
+                (int) Math.min(Integer.MAX_VALUE, total),
+                hasMore,
+                nextAfter
+        );
+    }
+
+    public record TimelinePage(
+            String aggregateId,
+            String aggregateType,
+            List<StoredEvent> events,
+            int totalEvents,
+            boolean hasMore,
+            long nextAfterSequence) {
+    }
+
     // ── Internal ────────────────────────────────────────────────────────────
 
     /**
