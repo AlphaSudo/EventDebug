@@ -1,4 +1,11 @@
+# syntax=docker/dockerfile:1
 ### Multi-stage Dockerfile for EventLens
+###
+### Platform: the *build* stage uses $BUILDPLATFORM (native builder). For a registry image
+### that must be linux/amd64 from any host, run:  docker build --platform linux/amd64 ...
+###
+### Gradle/npm: the host's ~/.gradle is NOT visible here. Cache mounts below reuse downloads
+### between builds on the same machine (BuildKit / Podman 4+).
 
 ## 1) Build stage – compile and assemble the fat JAR
 FROM --platform=$BUILDPLATFORM docker.io/library/eclipse-temurin:21-jdk AS build
@@ -20,10 +27,14 @@ COPY eventlens-api ./eventlens-api
 COPY eventlens-cli ./eventlens-cli
 COPY eventlens-ui ./eventlens-ui
 COPY eventlens-app ./eventlens-app
-COPY eventlens.yaml ./eventlens.yaml
+COPY eventlens.yaml.example ./eventlens.yaml
 
-# Ensure Unix line endings on ALL text files, then build the shaded JAR (tests run outside Docker)
-RUN find . -type f \( -name "*.kts" -o -name "*.properties" -o -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.yaml" -o -name "*.yml" -o -name "gradlew" \) -exec sed -i 's/\r$//' {} + && chmod +x gradlew && ./gradlew :eventlens-app:shadowJar -x test --no-daemon
+# Unix line endings + shaded JAR. --mount caches Gradle distro + deps and npm cache on the builder.
+RUN --mount=type=cache,target=/root/.gradle \
+    --mount=type=cache,target=/root/.npm \
+    find . -type f \( -name "*.kts" -o -name "*.properties" -o -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.yaml" -o -name "*.yml" -o -name "gradlew" \) -exec sed -i 's/\r$//' {} + \
+    && chmod +x gradlew \
+    && ./gradlew :eventlens-app:shadowJar -x test --no-daemon
 
 ## 2) Runtime stage – slim multi-arch JRE image (7.1)
 FROM docker.io/library/eclipse-temurin:21-jre-alpine AS base

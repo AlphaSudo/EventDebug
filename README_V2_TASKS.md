@@ -52,6 +52,12 @@ For detailed functional test scripts that validate each completed item, see `tes
 
 ## EPIC 6: Frontend Improvements
 
+These ship **without** “v2” or “Epic 6” labels in the UI. Quick verification:
+
+- **6.1** Pick an aggregate and an event — the address bar shows `?aggregateId=…&seq=…`; reload restores the same view.
+- **6.2** In **State at Event**, large BEFORE/AFTER JSON shows **Expand / Collapse** (folding); monospace blocks are the “highlighting” baseline in this repo (see `tests/README.md` §6.2).
+- **6.3** Skeletons on Timeline, StateViewer, and Anomaly panel while loading; live-stream disconnect toast; root `ErrorBoundary` in `main.tsx`.
+
 - [x] **6.1 Bookmarkable URLs with State**
 - [x] **6.2 JSON Syntax Highlighting with Folding**
 - [x] **6.3 Loading States and Error Boundaries**
@@ -63,7 +69,7 @@ For detailed functional test scripts that validate each completed item, see `tes
 
 ## EPIC 8: Testing Infrastructure
 
-- [ ] **8.1 OpenAPI Contract Tests**
+- [x] **8.1 OpenAPI Contract Tests**
 - [ ] **8.2 Load Test Suite (k6)**
-- [ ] **8.3 Dependency Vulnerability Scanning**
+- [x] **8.3 Dependency Vulnerability Scanning**
 

@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { StoredEvent } from '../api/client';
+import { demoLiveStreamSeed } from '../demo/demoData';
+import { isDemoMode } from '../demo/demoMode';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useToast } from './ToastProvider';
 import { parseEventTimestamp } from '../utils/time';
@@ -21,6 +23,9 @@ function rowClass(t: string): string {
     return typeClass(t);
 }
 
+/** Keep in sync with server WebSocket backfill size so the client buffer is not trimmed below backfill. */
+const BACKFILL_CAP = 100;
+
 function eventIcon(t: string): string {
     const l = t.toLowerCase();
     if (l.includes('deleted') || l.includes('closed') || l.includes('cancelled') || l.includes('rejected')) return '\u2716';
@@ -34,23 +39,29 @@ function eventIcon(t: string): string {
 }
 
 export default function LiveStream() {
-    const [events, setEvents] = useState<StoredEvent[]>([]);
+    const demo = isDemoMode();
+    const [events, setEvents] = useState<StoredEvent[]>(() => (demo ? demoLiveStreamSeed() : []));
     const [paused, setPaused] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
     const pausedRef = useRef(paused);
     pausedRef.current = paused;
     const { notify } = useToast();
 
-    const wsStatus = useWebSocket<StoredEvent>('/ws/live', event => {
-        if (pausedRef.current) return;
-        setEvents(prev => [...prev.slice(-99), event]);
-    });
+    const wsStatus = useWebSocket<StoredEvent>(
+        '/ws/live',
+        event => {
+            if (pausedRef.current) return;
+            setEvents(prev => [...prev.slice(-(BACKFILL_CAP - 1)), event]);
+        },
+        { enabled: !demo }
+    );
 
     const notifyRef = useRef(notify);
     notifyRef.current = notify;
     const disconnectCountRef = useRef(0);
 
     useEffect(() => {
+        if (demo) return;
         if (wsStatus === 'disconnected') {
             disconnectCountRef.current++;
             if (disconnectCountRef.current <= 1) {
@@ -59,13 +70,20 @@ export default function LiveStream() {
         } else if (wsStatus === 'connected') {
             disconnectCountRef.current = 0;
         }
-    }, [wsStatus]);
+    }, [wsStatus, demo]);
 
     useEffect(() => {
         if (!paused && scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [events, paused]);
+
+    // Space key shortcut wired from Timeline via custom event
+    useEffect(() => {
+        const handler = () => setPaused(p => !p);
+        window.addEventListener('eventlens:togglestream', handler);
+        return () => window.removeEventListener('eventlens:togglestream', handler);
+    }, []);
 
     return (
         <div className="card">
@@ -89,11 +107,11 @@ export default function LiveStream() {
             <div className="event-stream" ref={scrollRef}>
                 {events.length === 0 && (
                     <div style={{ color: 'var(--text-muted)', padding: '20px 0', fontSize: 12, fontFamily: 'var(--font-mono)' }}>
-                        Waiting for events&hellip;
+                        {demo ? 'Demo stream (static sample events)' : 'Waiting for events\u2026'}
                     </div>
                 )}
-                {events.map((e, i) => (
-                    <div key={i} className={`event-row ${rowClass(e.eventType)}`}>
+                {events.map((e) => (
+                    <div key={e.eventId} className={`event-row ${rowClass(e.eventType)}`}>
                         <span className="event-icon">{eventIcon(e.eventType)}</span>
                         <span className="event-time">{parseEventTimestamp(e.timestamp).toLocaleTimeString()}</span>
                         <span className={`event-type ${typeClass(e.eventType)}`}>{e.eventType}</span>

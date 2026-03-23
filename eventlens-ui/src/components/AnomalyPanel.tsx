@@ -1,12 +1,36 @@
 import { useQuery } from '@tanstack/react-query';
 import { getAnomalies, AnomalyReport } from '../api/client';
+import { parseEventTimestamp } from '../utils/time';
 
-const icons: Record<string, string> = {
-    CRITICAL: '\uD83D\uDD34',
-    HIGH: '\uD83D\uDFE0',
-    MEDIUM: '\uD83D\uDFE1',
-    LOW: '\uD83D\uDD35',
-};
+function severityBadgeClass(sev: string): string {
+    switch (sev) {
+        case 'CRITICAL':
+            return 'sev-critical';
+        case 'HIGH':
+            return 'sev-high';
+        case 'MEDIUM':
+            return 'sev-medium';
+        case 'LOW':
+            return 'sev-low';
+        default:
+            return 'sev-low';
+    }
+}
+
+function severityLabel(sev: string): string {
+    switch (sev) {
+        case 'CRITICAL':
+            return 'Critical';
+        case 'HIGH':
+            return 'High';
+        case 'MEDIUM':
+            return 'Warning';
+        case 'LOW':
+            return 'Info';
+        default:
+            return sev;
+    }
+}
 
 function ShieldIcon() {
     return (
@@ -67,7 +91,14 @@ export default function AnomalyPanel() {
 
     return (
         <div className="card">
-            <div className="card-title">&#x26A0;&#xFE0F; Anomaly Detection</div>
+            <div className="card-title anomaly-card-title-row">
+                <span className="anomaly-title-text">&#x26A0;&#xFE0F; Anomaly Detection</span>
+                {!isLoading && hasAnomalies && (
+                    <span className="anomaly-header-count" aria-label={`${anomalies!.length} anomalies`}>
+                        {anomalies!.length}
+                    </span>
+                )}
+            </div>
 
             {isLoading && <div className="skeleton" style={{ height: 120 }} />}
 
@@ -101,18 +132,46 @@ export default function AnomalyPanel() {
             )}
 
             {!isLoading && hasAnomalies && (
-                <div className="anomaly-list">
+                <div className="anomaly-scroll-region">
+                    <div className="anomaly-list-inner">
                     {anomalies!.map((a: AnomalyReport, i: number) => (
-                        <div key={i} className={`anomaly-item ${a.severity}`}>
-                            <span className="anomaly-icon">{icons[a.severity] ?? '\u26AA'}</span>
-                            <div>
-                                <div className="anomaly-desc">{a.description}</div>
-                                <div className="anomaly-sub">
-                                    {a.aggregateId} &middot; event #{a.atSequence} &middot; {a.triggeringEventType}
-                                </div>
+                        <details key={`${a.aggregateId}-${a.atSequence}-${i}`} className={`anomaly-card ${a.severity}`}>
+                            <summary className="anomaly-card-summary">
+                                <span className={`anomaly-severity-badge ${severityBadgeClass(a.severity)}`}>
+                                    {severityLabel(a.severity)}
+                                </span>
+                                <span className="anomaly-card-title">{a.description}</span>
+                                <span className="anomaly-card-chevron" aria-hidden>
+                                    ▼
+                                </span>
+                            </summary>
+                            <div className="anomaly-card-body">
+                                <p className="anomaly-card-meta">
+                                    <span className="anomaly-meta-label">Aggregate</span>
+                                    <code className="anomaly-meta-value">{a.aggregateId}</code>
+                                </p>
+                                <p className="anomaly-card-meta">
+                                    <span className="anomaly-meta-label">Sequence</span>
+                                    <span className="anomaly-meta-value">#{a.atSequence}</span>
+                                </p>
+                                <p className="anomaly-card-meta">
+                                    <span className="anomaly-meta-label">Event type</span>
+                                    <span className="anomaly-meta-value">{a.triggeringEventType}</span>
+                                </p>
+                                <p className="anomaly-card-meta">
+                                    <span className="anomaly-meta-label">When</span>
+                                    <span className="anomaly-meta-value">
+                                        {parseEventTimestamp(a.timestamp).toLocaleString()}
+                                    </span>
+                                </p>
+                                <p className="anomaly-card-meta">
+                                    <span className="anomaly-meta-label">Code</span>
+                                    <code className="anomaly-meta-value">{a.code}</code>
+                                </p>
                             </div>
-                        </div>
+                        </details>
                     ))}
+                    </div>
                 </div>
             )}
         </div>

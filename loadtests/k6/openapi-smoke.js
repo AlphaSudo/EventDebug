@@ -2,8 +2,12 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 export const options = {
-  vus: 20,
-  duration: '1m',
+  // Ramp-up avoids hammering EventLens before the listener is ready (reduces connection refused at t=0).
+  stages: [
+    { duration: '15s', target: 20 },
+    { duration: '45s', target: 20 },
+  ],
+  // gracefulRampDown is not valid on root options in this k6 version; default gracefulStop still applies.
   thresholds: {
     http_req_failed: ['rate<0.01'],
     http_req_duration: ['p(95)<500'],

@@ -1,11 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import SearchBar from './components/SearchBar';
 import Timeline from './components/Timeline';
-import StateViewer from './components/StateViewer';
+import StateViewer, { type TabId } from './components/StateViewer';
 import LiveStream from './components/LiveStream';
 import AnomalyPanel from './components/AnomalyPanel';
+import KeyboardHints from './components/KeyboardHints';
 import { useQuery } from '@tanstack/react-query';
-import { getHealth, getRecentEvents } from './api/client';
+import { getHealth, getRecentEvents, getTransitions } from './api/client';
+import { DEMO_AGGREGATE_ID } from './demo/demoData';
+import { isDemoMode } from './demo/demoMode';
+import { parseEventTimestamp } from './utils/time';
 
 function GeometricLogo() {
     return (
@@ -89,28 +93,81 @@ function ConnectionStats({ isUp }: { isUp: boolean }) {
     );
 }
 
+/** Sticky summary bar shown when an event is selected */
+function EventSummaryBar({
+    aggregateId,
+    sequence,
+    totalEvents,
+}: {
+    aggregateId: string;
+    sequence: number;
+    totalEvents: number;
+}) {
+    const { data: transitions } = useQuery({
+        queryKey: ['transitions', aggregateId],
+        queryFn: () => getTransitions(aggregateId),
+        staleTime: 30_000,
+    });
+
+    const transition = transitions?.find(t => t.event.sequenceNumber === sequence);
+    if (!transition) return null;
+
+    const { event, diff } = transition;
+    const changeCount = Object.keys(diff).length;
+    const stepIndex = transitions ? transitions.findIndex(t => t.event.sequenceNumber === sequence) + 1 : null;
+
+    return (
+        <div className="event-summary-bar">
+            <div className="event-summary-left">
+                <span className="event-summary-type">{event.eventType}</span>
+                <span className="event-summary-meta">
+                    seq #{sequence}
+                    {stepIndex !== null && ` · step ${stepIndex} of ${totalEvents}`}
+                    {' · '}
+                    {parseEventTimestamp(event.timestamp).toLocaleTimeString()}
+                </span>
+            </div>
+            {changeCount > 0 && (
+                <span className="event-summary-changes">
+                    {changeCount} {changeCount === 1 ? 'field' : 'fields'} changed
+                </span>
+            )}
+        </div>
+    );
+}
+
 export default function App() {
     const [selectedAggregate, setSelectedAggregate] = useState<string | null>(null);
     const [selectedSequence, setSelectedSequence] = useState<number | null>(null);
+    const [activeTab, setActiveTab] = useState<TabId>('summary');
 
-    // 6.1 Bookmarkable URLs with state
-    // On mount: hydrate selection from query params
+    // Listen for keyboard tab-switch (1-4 keys dispatched from Timeline)
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const tab = (e as CustomEvent<string>).detail as TabId;
+            if (tab) setActiveTab(tab);
+        };
+        window.addEventListener('eventlens:switchtab', handler);
+        return () => window.removeEventListener('eventlens:switchtab', handler);
+    }, []);
+
+    // Hydrate state from URL on mount
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const aggregateId = params.get('aggregateId');
         const seq = params.get('seq');
-        if (aggregateId) {
-            setSelectedAggregate(aggregateId);
-        }
+        const tab = params.get('tab') as TabId | null;
+        if (aggregateId) setSelectedAggregate(aggregateId);
         if (seq !== null) {
             const n = Number(seq);
-            if (!Number.isNaN(n)) {
-                setSelectedSequence(n);
-            }
+            if (!Number.isNaN(n)) setSelectedSequence(n);
+        }
+        if (tab && ['summary', 'changes', 'before-after', 'raw'].includes(tab)) {
+            setActiveTab(tab);
         }
     }, []);
 
-    // Whenever selection changes, reflect it in the URL query string
+    // Reflect selection + tab in URL
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         if (selectedAggregate) {
@@ -123,10 +180,11 @@ export default function App() {
         } else {
             params.delete('seq');
         }
+        params.set('tab', activeTab);
         const qs = params.toString();
         const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
         window.history.replaceState(null, '', newUrl);
-    }, [selectedAggregate, selectedSequence]);
+    }, [selectedAggregate, selectedSequence, activeTab]);
 
     const { data: health } = useQuery({
         queryKey: ['health'],
@@ -140,6 +198,15 @@ export default function App() {
         setSelectedAggregate(id);
         setSelectedSequence(null);
     };
+
+    // Get total event count for the summary bar
+    const { data: transitions } = useQuery({
+        queryKey: ['transitions', selectedAggregate],
+        queryFn: () => getTransitions(selectedAggregate!),
+        enabled: !!selectedAggregate,
+        staleTime: 30_000,
+    });
+    const totalEvents = transitions?.length ?? 0;
 
     return (
         <div className="app">
@@ -168,8 +235,14 @@ export default function App() {
             </header>
 
             <main className="app-main">
-                <div className="card">
-                    <div className="card-title">&#x26A1; Search Aggregates</div>
+                {isDemoMode() && (
+                    <div className="demo-banner" role="status">
+                        Demo mode (frontend only): API calls are stubbed with sample data. Search{' '}
+                        <code>{DEMO_AGGREGATE_ID}</code> or <code>demo</code> to load the sample aggregate.
+                    </div>
+                )}
+                <div className="card card--dropdown-host">
+                    <div className="card-title">⚡ Search Aggregates</div>
                     <SearchBar onSelect={handleSelectAggregate} />
                     {selectedAggregate && (
                         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
@@ -191,9 +264,19 @@ export default function App() {
                 )}
 
                 {selectedAggregate && selectedSequence !== null && (
+                    <EventSummaryBar
+                        aggregateId={selectedAggregate}
+                        sequence={selectedSequence}
+                        totalEvents={totalEvents}
+                    />
+                )}
+
+                {selectedAggregate && selectedSequence !== null && (
                     <StateViewer
                         aggregateId={selectedAggregate}
                         sequence={selectedSequence}
+                        activeTab={activeTab}
+                        onTabChange={setActiveTab}
                     />
                 )}
 
@@ -202,6 +285,8 @@ export default function App() {
                     <AnomalyPanel />
                 </div>
             </main>
+
+            <KeyboardHints />
         </div>
     );
 }

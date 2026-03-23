@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * </ul>
  *
  * <p>
- * On connect: sends the last 20 events as backfill so clients don't join a
+ * On connect: sends the last N events as backfill so clients don't join a
  * blank screen. Backfill is sent asynchronously to avoid blocking the
  * Jetty onConnect handler thread.
  *
@@ -42,6 +42,8 @@ public class LiveTailWebSocket {
 
     private static final Logger log = LoggerFactory.getLogger(LiveTailWebSocket.class);
     private static final int MAX_CONNECTIONS = 500;
+    /** Recent events sent on each new WebSocket connection (was 20; too small vs total store count). */
+    private static final int BACKFILL_EVENT_COUNT = 100;
 
     private final Set<WsContext> sessions = ConcurrentHashMap.newKeySet();
     private final ObjectMapper mapper = new ObjectMapper()
@@ -106,7 +108,7 @@ public class LiveTailWebSocket {
     private void backfill(WsContext ctx) {
         try {
             Thread.sleep(250);
-            var recent = reader.getRecentEvents(20);
+            var recent = reader.getRecentEvents(BACKFILL_EVENT_COUNT);
             for (var event : recent) {
                 if (!trySend(ctx, event)) break;
             }
