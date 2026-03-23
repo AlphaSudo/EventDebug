@@ -26,6 +26,7 @@ eventlens-ui/.env.development.local
 .idea/
 *.iml
 .vscode/
+.cursor/
 .DS_Store
 Thumbs.db
 .cursor/
@@ -34,6 +35,9 @@ Thumbs.db
 logs/
 *.log
 *.txt
+
+# Local scratchpad plans (not part of the repo)
+plans/
 
 # Config with real credentials — commit *.yaml.example instead
 eventlens.yaml
