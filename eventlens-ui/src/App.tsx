@@ -139,7 +139,7 @@ function EventSummaryBar({
 export default function App() {
     const [selectedAggregate, setSelectedAggregate] = useState<string | null>(null);
     const [selectedSequence, setSelectedSequence] = useState<number | null>(null);
-    const [activeTab, setActiveTab] = useState<TabId>('summary');
+    const [activeTab, setActiveTab] = useState<TabId>('changes');
 
     // Listen for keyboard tab-switch (1-4 keys dispatched from Timeline)
     useEffect(() => {
@@ -162,7 +162,7 @@ export default function App() {
             const n = Number(seq);
             if (!Number.isNaN(n)) setSelectedSequence(n);
         }
-        if (tab && ['summary', 'changes', 'before-after', 'raw'].includes(tab)) {
+        if (tab && ['changes', 'before-after', 'raw'].includes(tab)) {
             setActiveTab(tab);
         }
     }, []);

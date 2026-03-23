@@ -5,24 +5,18 @@ interface Props {
     diff: Record<string, FieldChange>;
 }
 
-type ViewMode = 'summary' | 'inline' | 'split';
-
-function formatValue(v: unknown): string {
-    if (v === null) return 'null';
-    if (typeof v === 'string') return v.length > 60 ? `"${v.slice(0, 57)}…"` : `"${v}"`;
-    return JSON.stringify(v);
-}
+type ViewMode = 'inline' | 'split';
 
 export default function StateDiff({ diff }: Props) {
     const entries = Object.entries(diff);
     const hasDiff = entries.length > 0;
-    const [mode, setMode] = useState<ViewMode>('summary');
+    const [mode, setMode] = useState<ViewMode>('inline');
     const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
     const scrollerRef = useRef<HTMLDivElement>(null);
 
     if (!hasDiff) return null;
 
-    const showMinimap = entries.length > 5 && mode !== 'summary';
+    const showMinimap = entries.length > 5;
 
     const scrollToRow = (i: number) => {
         rowRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -43,13 +37,6 @@ export default function StateDiff({ diff }: Props) {
                 <div className="diff-view-toggle" role="group" aria-label="Diff layout">
                     <button
                         type="button"
-                        className={mode === 'summary' ? 'active' : ''}
-                        onClick={() => setMode('summary')}
-                    >
-                        Summary
-                    </button>
-                    <button
-                        type="button"
                         className={mode === 'inline' ? 'active' : ''}
                         onClick={() => setMode('inline')}
                     >
@@ -65,23 +52,8 @@ export default function StateDiff({ diff }: Props) {
                 </div>
             </div>
 
-            {/* Summary mode — human-readable at a glance */}
-            {mode === 'summary' && (
-                <div className="diff-summary-view">
-                    {entries.map(([field, change]) => (
-                        <div key={field} className="diff-summary-row">
-                            <span className="diff-summary-field">{field}</span>
-                            <span className="diff-summary-old">{formatValue(change.oldValue)}</span>
-                            <span className="diff-summary-arrow">→</span>
-                            <span className="diff-summary-new">{formatValue(change.newValue)}</span>
-                        </div>
-                    ))}
-                </div>
-            )}
-
             {/* Inline / split modes */}
-            {mode !== 'summary' && (
-                <div className="diff-body">
+            <div className="diff-body">
                     {showMinimap && (
                         <div className="diff-minimap" title="Jump to change">
                             {entries.map((_, i) => (
@@ -157,7 +129,6 @@ export default function StateDiff({ diff }: Props) {
                         )}
                     </div>
                 </div>
-            )}
         </div>
     );
 }

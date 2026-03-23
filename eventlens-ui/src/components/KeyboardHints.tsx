@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 const SHORTCUTS = [
     { keys: '← →', desc: 'Navigate events' },
     { keys: 'Shift+← →', desc: 'Jump to group boundary' },
-    { keys: '1 – 4', desc: 'Switch tabs (Summary / Changes / ⇄ / Raw)' },
+    { keys: '1 – 3', desc: 'Switch tabs (Changes / ⇄ Before-After / Raw)' },
     { keys: 'Cmd+K', desc: 'Focus search' },
     { keys: 'Space', desc: 'Pause / resume live stream' },
     { keys: '?', desc: 'Toggle this hint bar' },
@@ -47,7 +47,7 @@ export default function KeyboardHints() {
                 <div className="keyboard-hints-bar">
                     <span className="keyboard-hints-item"><kbd className="keyboard-key-mini">← →</kbd> Navigate</span>
                     <span className="keyboard-hints-sep">·</span>
-                    <span className="keyboard-hints-item"><kbd className="keyboard-key-mini">1–4</kbd> Tabs</span>
+                    <span className="keyboard-hints-item"><kbd className="keyboard-key-mini">1–3</kbd> Tabs</span>
                     <span className="keyboard-hints-sep">·</span>
                     <span className="keyboard-hints-item"><kbd className="keyboard-key-mini">Space</kbd> Pause stream</span>
                     <span className="keyboard-hints-sep">·</span>

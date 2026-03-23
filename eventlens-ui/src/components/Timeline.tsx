@@ -204,7 +204,7 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
         // Number keys 1-4 switch StateViewer tabs — dispatched as custom event
         if (['1', '2', '3', '4'].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
             if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
-                const tabMap: Record<string, string> = { '1': 'summary', '2': 'changes', '3': 'before-after', '4': 'raw' };
+                const tabMap: Record<string, string> = { '1': 'changes', '2': 'before-after', '3': 'raw' };
                 window.dispatchEvent(new CustomEvent('eventlens:switchtab', { detail: tabMap[e.key] }));
             }
         }
