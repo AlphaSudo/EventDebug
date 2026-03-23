@@ -16,7 +16,7 @@ val assertjVersion      = "3.27.7"
 val testcontainersVersion = "1.20.1"
 val caffeineVersion     = "3.1.8"
 val micrometerVersion   = "1.15.0"
-val logstashEncoderVersion = "8.1"
+val logstashEncoderVersion = "9.0"
 val janinoVersion       = "3.1.12"
 
 allprojects {
