@@ -18,7 +18,6 @@ import {
     type DatasourceSummary,
     type PluginSummary,
 } from './api/client';
-import { DEMO_AGGREGATE_ID } from './demo/demoData';
 import { isDemoMode } from './demo/demoMode';
 import { parseEventTimestamp } from './utils/time';
 
@@ -61,6 +60,11 @@ function statusTone(status: string) {
     return '#ff6b6b';
 }
 
+function isHealthyStatus(status: string) {
+    const normalized = status.toLowerCase();
+    return normalized === 'ready' || normalized === 'up';
+}
+
 function isSelectableDatasource(status: string) {
     const normalized = status.toLowerCase();
     return normalized === 'ready';
@@ -94,7 +98,9 @@ function ConnectionStats({ isUp, source }: { isUp: boolean; source?: string | nu
         const h = Math.floor(s / 3600);
         const m = Math.floor((s % 3600) / 60);
         const sec = s % 60;
-        return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+        if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+        if (m > 0) return `${String(m).padStart(2, '0')}m ${String(sec).padStart(2, '0')}s`;
+        return `${String(sec).padStart(2, '0')}s`;
     };
 
     return (
@@ -104,13 +110,13 @@ function ConnectionStats({ isUp, source }: { isUp: boolean; source?: string | nu
                 <span className="conn-stat-label">API</span>
                 <span className={`conn-stat-value ${isUp ? 'green' : ''}`}>{isUp ? 'Healthy' : 'Down'}</span>
             </div>
-            <div className="conn-stat">
+            <div className="conn-stat conn-stat--metric">
                 <span className="conn-stat-label">Events</span>
                 <span className="conn-stat-value">{eventCount ?? '...'}</span>
             </div>
-            <div className="conn-stat">
+            <div className="conn-stat conn-stat--uptime">
                 <span className="conn-stat-label">Uptime</span>
-                <span className="conn-stat-value green">{fmtUptime(uptime)}</span>
+                <span className="conn-stat-value green conn-stat-value--uptime">{fmtUptime(uptime)}</span>
             </div>
         </div>
     );
@@ -161,64 +167,6 @@ function EventSummaryBar({
     );
 }
 
-function SourceSelector({
-    datasources,
-    selectedSource,
-    onChange,
-}: {
-    datasources: DatasourceSummary[];
-    selectedSource: string;
-    onChange: (value: string) => void;
-}) {
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                Datasource
-            </label>
-            <select
-                value={selectedSource}
-                onChange={e => onChange(e.target.value)}
-                style={{
-                    background: 'rgba(13, 17, 35, 0.85)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    borderRadius: 10,
-                    padding: '10px 12px',
-                    fontFamily: 'var(--font-mono)',
-                }}
-            >
-                <option value="">Auto (primary datasource)</option>
-                {datasources.map(source => (
-                    <option
-                        key={source.id}
-                        value={source.id}
-                        disabled={!isSelectableDatasource(source.status)}
-                    >
-                        {source.id} [{source.status}]
-                    </option>
-                ))}
-            </select>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {datasources.map(source => (
-                    <span
-                        key={source.id}
-                        style={{
-                            border: `1px solid ${statusTone(source.status)}55`,
-                            color: statusTone(source.status),
-                            padding: '4px 8px',
-                            borderRadius: 999,
-                            fontSize: 11,
-                            fontFamily: 'var(--font-mono)',
-                        }}
-                    >
-                        {source.id}: {source.status}
-                    </span>
-                ))}
-            </div>
-        </div>
-    );
-}
-
 function PluginHealthPage({
     datasources,
     datasourceHealth,
@@ -229,43 +177,29 @@ function PluginHealthPage({
     plugins: PluginSummary[];
 }) {
     return (
-        <div style={{ display: 'grid', gap: 20 }}>
-            <div className="card">
-                <div className="card-title">Plugin Health</div>
-                <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 0 }}>
-                    Source and stream readiness is surfaced from the plugin manager so we can spot failed connectors before switching the UI over.
-                </p>
-            </div>
-
+        <div className="plugin-dashboard">
             <div className="card">
                 <div className="card-title">Datasources</div>
-                <div style={{ display: 'grid', gap: 12 }}>
+                <div className="plugin-cards-grid">
                     {datasources.map((source, index) => {
                         const health = datasourceHealth[index];
                         const tone = statusTone(source.status);
                         return (
-                            <div
-                                key={source.id}
-                                style={{
-                                    border: '1px solid rgba(255,255,255,0.08)',
-                                    borderLeft: `4px solid ${tone}`,
-                                    borderRadius: 12,
-                                    padding: 14,
-                                    background: 'rgba(255,255,255,0.02)',
-                                }}
-                            >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                            <article key={source.id} className="plugin-card plugin-card--interactive" style={{ borderLeft: `3px solid ${tone}` }}>
+                                <div className="plugin-card-head">
                                     <strong>{source.displayName}</strong>
-                                    <span style={{ color: tone, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{source.status}</span>
+                                    <span className="plugin-pill" style={{ color: tone, borderColor: `${tone}55` }}>
+                                        {source.status}
+                                    </span>
                                 </div>
-                                <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 8 }}>{source.id}</div>
+                                <div className="plugin-card-meta">{source.id}</div>
                                 {health && (
-                                    <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 8 }}>
+                                    <div className="plugin-card-detail">
                                         {health.health.message}
                                         {health.failureReason ? ` | ${health.failureReason}` : ''}
                                     </div>
                                 )}
-                            </div>
+                            </article>
                         );
                     })}
                 </div>
@@ -273,31 +207,24 @@ function PluginHealthPage({
 
             <div className="card">
                 <div className="card-title">All Plugins</div>
-                <div style={{ display: 'grid', gap: 12 }}>
+                <div className="plugin-cards-grid plugin-cards-grid--dense">
                     {plugins.map(plugin => (
-                        <div
-                            key={plugin.instanceId}
-                            style={{
-                                border: '1px solid rgba(255,255,255,0.08)',
-                                borderRadius: 12,
-                                padding: 14,
-                                background: 'rgba(255,255,255,0.02)',
-                            }}
-                        >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <article key={plugin.instanceId} className="plugin-card plugin-card--interactive">
+                            <div className="plugin-card-head">
                                 <strong>{plugin.displayName}</strong>
-                                <span style={{ color: statusTone(plugin.lifecycle), fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                                <span className="plugin-pill" style={{ color: statusTone(plugin.lifecycle), borderColor: `${statusTone(plugin.lifecycle)}55` }}>
                                     {plugin.lifecycle}
                                 </span>
                             </div>
-                            <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 8 }}>
-                                {plugin.instanceId} | {plugin.pluginType} | {plugin.typeId}
+                            <div className="plugin-card-meta">
+                                {plugin.pluginType} | {plugin.typeId}
                             </div>
-                            <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 8 }}>
+                            <div className="plugin-card-meta">{plugin.instanceId}</div>
+                            <div className="plugin-card-detail">
                                 {plugin.health.message}
                                 {plugin.failureReason ? ` | ${plugin.failureReason}` : ''}
                             </div>
-                        </div>
+                        </article>
                     ))}
                 </div>
             </div>
@@ -311,6 +238,7 @@ export default function App() {
     const [activeTab, setActiveTab] = useState<TabId>('changes');
     const [selectedSource, setSelectedSource] = useState('');
     const [currentHash, setCurrentHash] = useState(window.location.hash || '');
+    const [workspaceDockOpen, setWorkspaceDockOpen] = useState(false);
 
     useEffect(() => {
         const handler = (e: Event) => {
@@ -412,6 +340,9 @@ export default function App() {
     const totalEvents = timelineSummary?.totalEvents ?? 0;
 
     const pluginView = currentHash === '#/plugins';
+    const healthySources = datasources.filter(source => isHealthyStatus(source.status)).length;
+    const healthyPlugins = plugins.filter(plugin => isHealthyStatus(plugin.lifecycle)).length;
+    const issueCount = (datasources.length - healthySources) + (plugins.length - healthyPlugins);
 
     return (
         <div className="app">
@@ -426,9 +357,16 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="header-title">EventLens</div>
+                <div className="header-center">
+                    {isDemoMode() && (
+                        <div className="header-demo-pill" role="status">
+                            Demo mode
+                        </div>
+                    )}
+                    <div className="header-title">EventLens</div>
+                </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+                <div className="header-actions">
                     <ConnectionStats isUp={isUp} source={selectedSource || null} />
                     <div className="header-status">
                         <span className={`dot ${isUp ? 'dot-green' : 'dot-red'}`} />
@@ -439,93 +377,139 @@ export default function App() {
                 </div>
             </header>
 
-            <main className="app-main">
-                {isDemoMode() && (
-                    <div className="demo-banner" role="status">
-                        Demo mode (frontend only): API calls are stubbed with sample data. Search{' '}
-                        <code>{DEMO_AGGREGATE_ID}</code> or <code>demo</code> to load the sample aggregate.
-                    </div>
-                )}
-
-                <div className="card" style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div>
-                        <div className="card-title" style={{ marginBottom: 6 }}>Workspace</div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-                            Switch datasource context without breaking the default single-source flow.
+            <aside
+                className={`workspace-dock${workspaceDockOpen ? ' workspace-dock--open' : ''}`}
+                aria-label="Workspace"
+            >
+                <div className="workspace-dock-panel" id="workspace-dock-panel" hidden={!workspaceDockOpen}>
+                    <div className="workspace-dock-title">Workspace</div>
+                    <label className="workspace-datasource">
+                        <span className="workspace-datasource-label">Datasource</span>
+                        <select
+                            id="workspace-datasource-select"
+                            className="workspace-datasource-select"
+                            value={selectedSource}
+                            onChange={e => {
+                                setSelectedSource(e.target.value);
+                                setSelectedSequence(null);
+                            }}
+                        >
+                            <option value="">Auto (primary datasource)</option>
+                            {datasources.map(source => (
+                                <option
+                                    key={source.id}
+                                    value={source.id}
+                                    disabled={!isSelectableDatasource(source.status)}
+                                >
+                                    {source.id} [{source.status}]
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <div className="workspace-sidebar-kpis">
+                        <div className="workspace-kpi-row">
+                            <span>Datasources Healthy</span>
+                            <strong>{healthySources}/{datasources.length || 0}</strong>
+                        </div>
+                        <div className="workspace-kpi-row">
+                            <span>Plugins Healthy</span>
+                            <strong>{healthyPlugins}/{plugins.length || 0}</strong>
+                        </div>
+                        <div className="workspace-kpi-row">
+                            <span>Issues</span>
+                            <strong>{issueCount}</strong>
                         </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                        <a href="#" style={{ color: pluginView ? 'var(--text-muted)' : 'var(--neon-cyan)' }}>Explorer</a>
-                        <a href="#/plugins" style={{ color: pluginView ? 'var(--neon-cyan)' : 'var(--text-muted)' }}>Plugins</a>
+                    <div className="workspace-sidebar-links">
+                        <span>Datasources</span>
+                        <span>All Plugins</span>
                     </div>
                 </div>
+                <button
+                    type="button"
+                    className="workspace-dock-handle"
+                    onClick={() => setWorkspaceDockOpen(o => !o)}
+                    aria-expanded={workspaceDockOpen}
+                    aria-controls="workspace-dock-panel"
+                    aria-label={workspaceDockOpen ? 'Collapse workspace' : 'Expand workspace'}
+                    title={workspaceDockOpen ? 'Collapse workspace' : 'Expand workspace'}
+                >
+                    <span className="workspace-dock-chevron" aria-hidden>
+                        {workspaceDockOpen ? '›' : '‹'}
+                    </span>
+                </button>
+            </aside>
 
-                {pluginView ? (
-                    <PluginHealthPage
-                        datasources={datasources}
-                        datasourceHealth={datasourceHealth}
-                        plugins={plugins}
-                    />
-                ) : (
-                    <>
-                        <div className="card card--dropdown-host">
-                            <div className="card-title">Search Aggregates</div>
-                            <SourceSelector
-                                datasources={datasources}
-                                selectedSource={selectedSource}
-                                onChange={value => {
-                                    setSelectedSource(value);
-                                    setSelectedSequence(null);
-                                }}
-                            />
-                            <div style={{ height: 12 }} />
+            {workspaceDockOpen && (
+                <button
+                    type="button"
+                    className="workspace-dock-scrim"
+                    aria-label="Close workspace panel"
+                    onClick={() => setWorkspaceDockOpen(false)}
+                />
+            )}
+
+            <main className="app-main">
+                <div className="workspace-content">
+                    {!pluginView && (
+                        <div className="card search-panel card--dropdown-host">
+                            <label className="control-field-label" htmlFor="aggregate-search">Search Aggregates</label>
                             <SearchBar onSelect={handleSelectAggregate} source={selectedSource || null} />
                             {selectedAggregate && (
-                                <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                                <div className="selection-summary">
                                     Viewing: <span style={{ color: 'var(--neon-cyan)', textShadow: '0 0 6px rgba(0,240,255,0.3)' }}>{selectedAggregate}</span>
                                     {selectedSource ? <span> on {selectedSource}</span> : <span> on primary datasource</span>}
-                                    <button
-                                        onClick={() => setSelectedAggregate(null)}
-                                        style={{ marginLeft: 12, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
-                                    >&times; clear</button>
+                                    <button className="selection-clear-btn" onClick={() => setSelectedAggregate(null)}>
+                                        &times; clear
+                                    </button>
                                 </div>
                             )}
                         </div>
+                    )}
 
-                        {selectedAggregate && (
-                            <Timeline
-                                aggregateId={selectedAggregate}
-                                selectedSequence={selectedSequence}
-                                onSelectEvent={setSelectedSequence}
-                                source={selectedSource || null}
+                    {pluginView ? (
+                            <PluginHealthPage
+                                datasources={datasources}
+                                datasourceHealth={datasourceHealth}
+                                plugins={plugins}
                             />
-                        )}
+                        ) : (
+                            <>
+                                {selectedAggregate && (
+                                    <Timeline
+                                        aggregateId={selectedAggregate}
+                                        selectedSequence={selectedSequence}
+                                        onSelectEvent={setSelectedSequence}
+                                        source={selectedSource || null}
+                                    />
+                                )}
 
-                        {selectedAggregate && selectedSequence !== null && (
-                            <EventSummaryBar
-                                aggregateId={selectedAggregate}
-                                sequence={selectedSequence}
-                                totalEvents={totalEvents}
-                                source={selectedSource || null}
-                            />
-                        )}
+                                {selectedAggregate && selectedSequence !== null && (
+                                    <EventSummaryBar
+                                        aggregateId={selectedAggregate}
+                                        sequence={selectedSequence}
+                                        totalEvents={totalEvents}
+                                        source={selectedSource || null}
+                                    />
+                                )}
 
-                        {selectedAggregate && selectedSequence !== null && (
-                            <StateViewer
-                                aggregateId={selectedAggregate}
-                                sequence={selectedSequence}
-                                activeTab={activeTab}
-                                onTabChange={setActiveTab}
-                                source={selectedSource || null}
-                            />
-                        )}
+                                {selectedAggregate && selectedSequence !== null && (
+                                    <StateViewer
+                                        aggregateId={selectedAggregate}
+                                        sequence={selectedSequence}
+                                        activeTab={activeTab}
+                                        onTabChange={setActiveTab}
+                                        source={selectedSource || null}
+                                    />
+                                )}
 
-                        <div className="bottom-grid">
-                            <LiveStream />
-                            <AnomalyPanel />
-                        </div>
-                    </>
-                )}
+                                <div className="bottom-grid">
+                                    <LiveStream />
+                                    <AnomalyPanel />
+                                </div>
+                            </>
+                        )}
+                </div>
             </main>
 
             <KeyboardHints />
