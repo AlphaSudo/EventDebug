@@ -668,3 +668,13 @@ In containerized environments, direct logs to stdout/stderr and collect them via
 - [Plugin authoring guide](C:/Java%20Developer/EventDebug/docs/plugin-authoring.md)
 - [v3 GA checklist](C:/Java%20Developer/EventDebug/docs/v3-ga-checklist.md)
 - [SPI README](C:/Java%20Developer/EventDebug/eventlens-spi/README.md)
+
+## v3 Release Smoke
+
+Run the compact cross-phase smoke gate with:
+
+`ash
+pwsh ./scripts/v3-release-smoke.ps1
+`
+
+This verifies key v3 evidence files are present and runs 	est + check as the release gate.

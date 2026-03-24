@@ -404,3 +404,8 @@ Assumptions:
   - Build succeeds for both amd64 and arm64.
   - Container health status reports `"Status": "healthy"` based on `/api/v1/health/live`.
 
+
+## v3 Smoke Script
+
+Use [scripts/v3-release-smoke.ps1](C:/Java%20Developer/EventDebug/scripts/v3-release-smoke.ps1) for a compact cross-phase release smoke run.
+It is intentionally smaller than a script-per-bullet approach and relies on the automated test suite for the heavy lifting.

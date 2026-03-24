@@ -32,6 +32,12 @@ This compiles all modules, runs the React Vite build, and produces the fat JAR a
 
 Built-in plugins should keep passing the shared contract harness in `eventlens-plugin-test`.
 
+For a compact v3 release smoke pass, run:
+
+```bash
+pwsh ./scripts/v3-release-smoke.ps1
+```
+
 ## Running Locally
 
 ```bash
@@ -69,3 +75,4 @@ Please open a GitHub Issue with:
 - Start with [docs/plugin-authoring.md](C:/Java%20Developer/EventDebug/docs/plugin-authoring.md).
 - Reuse the shared contract harness from ventlens-plugin-test for new source or stream plugins.
 - Register plugin entry points with META-INF/services/... so discovery works from classpath and /plugins.
+
