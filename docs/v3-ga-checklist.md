@@ -18,9 +18,9 @@ This checklist translates the v3 release criteria from [`versions/v3.md`](C:/Jav
 
 ## SHOULD
 
-- [ ] External plugin JAR loading should be verified with a dummy plugin artifact.
-- [ ] Cache hit ratio should be measured under repeated-query load tests.
-- [ ] Metadata-only mode should be benchmarked for response-size reduction.
+- [x] External plugin JAR loading is verified with a dummy plugin artifact in [`PluginDiscoveryExternalJarTest.java`](C:/Java%20Developer/EventDebug/eventlens-core/src/test/java/io/eventlens/core/plugin/PluginDiscoveryExternalJarTest.java).
+- [x] Cache hit ratio is measured under repeated-query synthetic load in [`QueryResultCacheBenchmarkTest.java`](C:/Java%20Developer/EventDebug/eventlens-api/src/test/java/io/eventlens/api/cache/QueryResultCacheBenchmarkTest.java).
+- [x] Metadata-only mode is benchmarked for response-size reduction in [`TimelineMetadataPayloadBenchmarkTest.java`](C:/Java%20Developer/EventDebug/eventlens-api/src/test/java/io/eventlens/api/routes/TimelineMetadataPayloadBenchmarkTest.java).
 
 ## MUST NOT
 
@@ -43,3 +43,4 @@ Recommended gate before a release candidate:
 ```
 
 These commands validate the shared plugin contracts, built-in plugin modules, API tests, and UI build.
+
