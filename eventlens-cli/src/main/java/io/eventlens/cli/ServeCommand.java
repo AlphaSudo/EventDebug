@@ -18,6 +18,7 @@ import io.eventlens.core.plugin.PluginDiscovery;
 import io.eventlens.core.plugin.PluginManager;
 import io.eventlens.core.spi.EventStoreReader;
 import io.eventlens.core.spi.ResilientEventStoreReader;
+import io.eventlens.mysql.MySqlEventSourcePlugin;
 import io.eventlens.kafka.KafkaStreamAdapterPlugin;
 import io.eventlens.pg.PostgresEventSourcePlugin;
 import io.eventlens.spi.Event;
@@ -29,6 +30,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Command(name = "serve", description = "Start the EventLens web server")
@@ -76,20 +78,18 @@ public class ServeCommand implements Runnable {
         ConfigValidator.validateOrThrow(config);
 
         PluginManager pluginManager = new PluginManager(config.getPlugins().getHealthCheckIntervalSeconds());
-        registerBuiltInPlugins(config, pluginManager);
+        PluginDiscovery.DiscoveryResult discovered = new PluginDiscovery().discoverFromClasspath()
+                .merge(new PluginDiscovery().discoverFromDirectory(config.getPlugins().getDirectory()));
+
+        registerDatasources(config, pluginManager, discovered);
+        registerStreams(config, pluginManager, discovered);
         pluginManager.startHealthChecks();
 
-        EventSourcePlugin sourcePlugin = pluginManager.getFirstReadyEventSource()
-                .orElseThrow(() -> new IllegalStateException("No ready event source plugin found"));
-        if (!(sourcePlugin instanceof EventStoreReader sourceReader)) {
-            throw new IllegalStateException("Selected event source plugin does not implement EventStoreReader: " + sourcePlugin.getClass().getName());
-        }
-
+        EventStoreReader sourceReader = selectPrimaryReader(config, pluginManager);
         var reader = new ResilientEventStoreReader(sourceReader);
         var registry = new ReducerRegistry();
         if (classpathJars != null && !classpathJars.isEmpty()) {
-            var loader = new ClasspathReducerLoader();
-            loader.loadAll(registry, classpathJars, config.getReplay().getReducers());
+            new ClasspathReducerLoader().loadAll(registry, classpathJars, config.getReplay().getReducers());
         }
 
         var replayEngine = new ReplayEngine(reader, registry);
@@ -102,7 +102,7 @@ public class ServeCommand implements Runnable {
         var auditLogger = new AuditLogger(config.getAudit().isEnabled());
         var liveTail = new LiveTailWebSocket(reader, auditLogger);
 
-        pluginManager.getFirstReadyStreamAdapter().ifPresentOrElse(
+        selectPrimaryStream(config, pluginManager).ifPresentOrElse(
                 stream -> startStreaming(stream, liveTail),
                 liveTail::startPolling);
 
@@ -123,45 +123,86 @@ public class ServeCommand implements Runnable {
         }
     }
 
-    private void registerBuiltInPlugins(EventLensConfig config, PluginManager pluginManager) {
-        PluginDiscovery discovery = new PluginDiscovery();
-        PluginDiscovery.DiscoveryResult discovered = discovery.discoverFromClasspath()
-                .merge(discovery.discoverFromDirectory(config.getPlugins().getDirectory()));
-
-        EventSourcePlugin postgres = discovered.eventSources().stream()
-                .filter(plugin -> "postgres".equals(plugin.typeId()))
-                .findFirst()
-                .orElseGet(PostgresEventSourcePlugin::new);
-        pluginManager.registerEventSource("default", postgres, postgresConfig(config));
-
-        String brokers = kafkaBrokers != null ? kafkaBrokers : config.getKafka() != null ? config.getKafka().getBootstrapServers() : null;
-        String topic = kafkaTopic != null ? kafkaTopic : config.getKafka() != null ? config.getKafka().getTopic() : null;
-        if (brokers != null && topic != null) {
-            StreamAdapterPlugin kafka = discovered.streamAdapters().stream()
-                    .filter(plugin -> "kafka".equals(plugin.typeId()))
+    private void registerDatasources(EventLensConfig config, PluginManager pluginManager, PluginDiscovery.DiscoveryResult discovered) {
+        for (EventLensConfig.DatasourceInstanceConfig ds : config.getDatasourcesOrLegacy()) {
+            if (ds == null || !ds.isEnabled()) continue;
+            EventSourcePlugin plugin = discovered.eventSources().stream()
+                    .filter(candidate -> ds.getType().equalsIgnoreCase(candidate.typeId()))
                     .findFirst()
-                    .orElseGet(KafkaStreamAdapterPlugin::new);
+                    .orElseGet(() -> createBuiltinDatasource(ds.getType()));
+            pluginManager.registerEventSource(ds.getId(), plugin, datasourceConfig(ds));
+        }
+    }
+
+    private void registerStreams(EventLensConfig config, PluginManager pluginManager, PluginDiscovery.DiscoveryResult discovered) {
+        List<EventLensConfig.StreamInstanceConfig> streams = config.getStreamsOrLegacy();
+        for (int i = 0; i < streams.size(); i++) {
+            EventLensConfig.StreamInstanceConfig stream = streams.get(i);
+            if (stream == null || !stream.isEnabled()) continue;
+            if (i == 0 && kafkaBrokers != null) stream.setBootstrapServers(kafkaBrokers);
+            if (i == 0 && kafkaTopic != null) stream.setTopic(kafkaTopic);
+            StreamAdapterPlugin plugin = discovered.streamAdapters().stream()
+                    .filter(candidate -> stream.getType().equalsIgnoreCase(candidate.typeId()))
+                    .findFirst()
+                    .orElseGet(() -> createBuiltinStream(stream.getType()));
             try {
-                pluginManager.registerStreamAdapter("default-kafka", kafka, Map.of(
-                        "bootstrapServers", brokers,
-                        "topic", topic));
-                log.info("Kafka stream adapter registered for topic: {}", topic);
+                pluginManager.registerStreamAdapter(stream.getId(), plugin, Map.of(
+                        "bootstrapServers", stream.getBootstrapServers(),
+                        "topic", stream.getTopic()));
             } catch (Exception e) {
-                log.warn("Kafka unavailable ({}) - using PostgreSQL polling fallback", e.getMessage());
+                log.warn("Stream '{}' unavailable ({}). Skipping.", stream.getId(), e.getMessage());
             }
         }
     }
 
-    private Map<String, Object> postgresConfig(EventLensConfig config) {
+    private EventStoreReader selectPrimaryReader(EventLensConfig config, PluginManager pluginManager) {
+        for (EventLensConfig.DatasourceInstanceConfig ds : config.getDatasourcesOrLegacy()) {
+            var plugin = pluginManager.getEventSource(ds.getId()).orElse(null);
+            if (plugin instanceof EventStoreReader reader) {
+                return reader;
+            }
+        }
+        return pluginManager.getFirstReadyEventSource()
+                .filter(EventStoreReader.class::isInstance)
+                .map(EventStoreReader.class::cast)
+                .orElseThrow(() -> new IllegalStateException("No ready event source plugin found"));
+    }
+
+    private java.util.Optional<StreamAdapterPlugin> selectPrimaryStream(EventLensConfig config, PluginManager pluginManager) {
+        for (EventLensConfig.StreamInstanceConfig stream : config.getStreamsOrLegacy()) {
+            var plugin = pluginManager.getStreamAdapter(stream.getId());
+            if (plugin.isPresent()) {
+                return plugin;
+            }
+        }
+        return pluginManager.getFirstReadyStreamAdapter();
+    }
+
+    private Map<String, Object> datasourceConfig(EventLensConfig.DatasourceInstanceConfig ds) {
         Map<String, Object> sourceConfig = new HashMap<>();
-        sourceConfig.put("jdbcUrl", config.getDatasource().getUrl());
-        sourceConfig.put("username", config.getDatasource().getUsername());
-        sourceConfig.put("password", config.getDatasource().getPassword());
-        sourceConfig.put("tableName", config.getDatasource().getTable());
-        sourceConfig.put("columnOverrides", config.getDatasource().getColumns());
-        sourceConfig.put("pool", config.getDatasource().getPool());
-        sourceConfig.put("queryTimeoutSeconds", config.getDatasource().getQueryTimeoutSeconds());
+        sourceConfig.put("jdbcUrl", ds.getUrl());
+        sourceConfig.put("username", ds.getUsername());
+        sourceConfig.put("password", ds.getPassword());
+        sourceConfig.put("tableName", ds.getTable());
+        sourceConfig.put("columnOverrides", ds.getColumns());
+        sourceConfig.put("pool", ds.getPool());
+        sourceConfig.put("queryTimeoutSeconds", ds.getQueryTimeoutSeconds());
         return sourceConfig;
+    }
+
+    private EventSourcePlugin createBuiltinDatasource(String type) {
+        return switch (type.toLowerCase()) {
+            case "postgres" -> new PostgresEventSourcePlugin();
+            case "mysql" -> new MySqlEventSourcePlugin();
+            default -> throw new IllegalArgumentException("Unsupported datasource type: " + type);
+        };
+    }
+
+    private StreamAdapterPlugin createBuiltinStream(String type) {
+        return switch (type.toLowerCase()) {
+            case "kafka" -> new KafkaStreamAdapterPlugin();
+            default -> throw new IllegalArgumentException("Unsupported stream type: " + type);
+        };
     }
 
     private void startStreaming(StreamAdapterPlugin streamAdapter, LiveTailWebSocket liveTail) {

@@ -1,8 +1,8 @@
 package io.eventlens.core;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
@@ -15,18 +15,7 @@ import java.io.File;
 import java.io.IOException;
 
 /**
- * Discovers and loads the EventLens configuration file from well-known
- * locations.
- *
- * <p>
- * Search order:
- * <ol>
- * <li>{@code eventlens.yaml} (working directory)</li>
- * <li>{@code eventlens.yml} (working directory)</li>
- * <li>{@code ~/.eventlens/config.yaml}</li>
- * <li>{@code /etc/eventlens/config.yaml}</li>
- * </ol>
- * Falls back to sensible defaults when no file is found.
+ * Discovers and loads the EventLens configuration file from well-known locations.
  */
 public class ConfigLoader {
 
@@ -56,13 +45,10 @@ public class ConfigLoader {
                 }
             }
         }
-        log.warn("No config file found — using defaults. Searched: {}", String.join(", ", CONFIG_PATHS));
+        log.warn("No config file found - using defaults. Searched: {}", String.join(", ", CONFIG_PATHS));
         return new EventLensConfig();
     }
 
-    /**
-     * Load a config from a specific path (e.g. from a --config CLI flag).
-     */
     public static EventLensConfig load(String path) {
         File file = new File(path);
         if (!file.exists()) {
@@ -83,7 +69,8 @@ public class ConfigLoader {
             throw new ConfigurationException("Config file is empty: " + file.getAbsolutePath());
         }
         interpolateNode(root);
-        return YAML_MAPPER.treeToValue(root, EventLensConfig.class);
+        JsonNode normalized = ConfigMigrator.normalize(root, log);
+        return YAML_MAPPER.treeToValue(normalized, EventLensConfig.class);
     }
 
     private static void interpolateNode(JsonNode node) {

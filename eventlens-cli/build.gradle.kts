@@ -2,6 +2,7 @@ dependencies {
     implementation(project(":eventlens-core"))
     implementation(project(":eventlens-spi"))
     implementation(project(":eventlens-source-postgres"))
+    implementation(project(":eventlens-source-mysql"))
     implementation(project(":eventlens-stream-kafka"))
     implementation(project(":eventlens-api"))
     implementation("io.javalin:javalin:7.1.0")

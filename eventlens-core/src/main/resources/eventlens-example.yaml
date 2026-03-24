@@ -1,5 +1,5 @@
 # EventLens Configuration Example
-# This file shows all available configuration options with their defaults
+# v2 legacy keys are still supported, but v3 plural source/stream blocks are preferred.
 
 version: "3.0.0"
 
@@ -19,45 +19,50 @@ server:
       requests-per-minute: 120
       burst: 20
 
-# Plugin system configuration (v3)
 plugins:
-  # Directory containing external plugin JARs
-  # Supports environment variable interpolation: ${PLUGINS_DIR:-./plugins}
   directory: ./plugins
-  
-  # How often to check plugin health (seconds)
   health-check-interval-seconds: 30
 
-datasource:
-  url: jdbc:postgresql://localhost:5432/eventlens_dev
-  username: postgres
-  password: ""
-  table: null  # null = auto-detect
-  query-timeout-seconds: 30
-  
-  # Optional: explicit column name overrides
-  columns:
-    event-id: null
-    aggregate-id: null
-    aggregate-type: null
-    sequence: null
-    event-type: null
-    payload: null
-    metadata: null
-    timestamp: null
-    global-position: null
-  
-  pool:
-    maximum-pool-size: 10
-    minimum-idle: 2
-    connection-timeout-ms: 5000
-    idle-timeout-ms: 300000
-    max-lifetime-ms: 900000
-    leak-detection-threshold-ms: 30000
+# Preferred v3 multi-source format
+datasources:
+  - id: default
+    type: postgres
+    url: jdbc:postgresql://localhost:5432/eventlens_dev
+    username: postgres
+    password: ""
+    table: null
+    query-timeout-seconds: 30
+    columns:
+      event-id: null
+      aggregate-id: null
+      aggregate-type: null
+      sequence: null
+      event-type: null
+      payload: null
+      metadata: null
+      timestamp: null
+      global-position: null
+    pool:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout-ms: 5000
+      idle-timeout-ms: 300000
+      max-lifetime-ms: 900000
+      leak-detection-threshold-ms: 30000
 
-kafka:
-  bootstrap-servers: null  # null = Kafka disabled
-  topic: domain-events
+  - id: reporting-mysql
+    type: mysql
+    url: jdbc:mysql://localhost:3306/eventlens_reporting
+    username: root
+    password: ""
+    table: event_store
+    query-timeout-seconds: 30
+
+streams:
+  - id: default-kafka
+    type: kafka
+    bootstrap-servers: localhost:9092
+    topic: domain-events
 
 replay:
   default-reducer: generic
