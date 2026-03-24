@@ -6,8 +6,8 @@ plugins {
 
 dependencies {
     implementation(project(":eventlens-core"))
-    implementation(project(":eventlens-pg"))
-    implementation(project(":eventlens-kafka"))
+    implementation(project(":eventlens-source-postgres"))
+    implementation(project(":eventlens-stream-kafka"))
     implementation(project(":eventlens-api"))
     implementation(project(":eventlens-cli"))
     implementation("ch.qos.logback:logback-classic:1.5.32")

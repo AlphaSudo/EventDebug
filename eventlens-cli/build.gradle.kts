@@ -1,7 +1,8 @@
 dependencies {
     implementation(project(":eventlens-core"))
-    implementation(project(":eventlens-pg"))
-    implementation(project(":eventlens-kafka"))
+    implementation(project(":eventlens-spi"))
+    implementation(project(":eventlens-source-postgres"))
+    implementation(project(":eventlens-stream-kafka"))
     implementation(project(":eventlens-api"))
     implementation("io.javalin:javalin:7.1.0")
     implementation("info.picocli:picocli:4.7.7")

@@ -197,6 +197,36 @@ public class PluginManager implements AutoCloseable {
         return Optional.ofNullable(instances.get(instanceId));
     }
 
+    public Optional<EventSourcePlugin> getEventSource(String instanceId) {
+        return getInstance(instanceId)
+                .filter(i -> i.pluginType() == PluginInstance.PluginType.EVENT_SOURCE)
+                .filter(i -> i.lifecycle() == PluginLifecycle.READY || i.lifecycle() == PluginLifecycle.DEGRADED)
+                .map(i -> (EventSourcePlugin) i.plugin());
+    }
+
+    public Optional<StreamAdapterPlugin> getStreamAdapter(String instanceId) {
+        return getInstance(instanceId)
+                .filter(i -> i.pluginType() == PluginInstance.PluginType.STREAM_ADAPTER)
+                .filter(i -> i.lifecycle() == PluginLifecycle.READY || i.lifecycle() == PluginLifecycle.DEGRADED)
+                .map(i -> (StreamAdapterPlugin) i.plugin());
+    }
+
+    public Optional<EventSourcePlugin> getFirstReadyEventSource() {
+        return instances.values().stream()
+                .filter(i -> i.pluginType() == PluginInstance.PluginType.EVENT_SOURCE)
+                .filter(i -> i.lifecycle() == PluginLifecycle.READY || i.lifecycle() == PluginLifecycle.DEGRADED)
+                .map(i -> (EventSourcePlugin) i.plugin())
+                .findFirst();
+    }
+
+    public Optional<StreamAdapterPlugin> getFirstReadyStreamAdapter() {
+        return instances.values().stream()
+                .filter(i -> i.pluginType() == PluginInstance.PluginType.STREAM_ADAPTER)
+                .filter(i -> i.lifecycle() == PluginLifecycle.READY || i.lifecycle() == PluginLifecycle.DEGRADED)
+                .map(i -> (StreamAdapterPlugin) i.plugin())
+                .findFirst();
+    }
+
     @Override
     public void close() {
         log.info("Shutting down plugin manager...");
@@ -269,3 +299,5 @@ public class PluginManager implements AutoCloseable {
         HealthStatus check();
     }
 }
+
+

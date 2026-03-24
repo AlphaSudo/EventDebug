@@ -2,19 +2,34 @@ package io.eventlens.cli;
 
 import io.eventlens.api.EventLensServer;
 import io.eventlens.api.websocket.LiveTailWebSocket;
-import io.eventlens.core.ConfigValidator;
 import io.eventlens.core.ConfigLoader;
+import io.eventlens.core.ConfigValidator;
 import io.eventlens.core.EventLensConfig;
-import io.eventlens.core.aggregator.*;
+import io.eventlens.core.aggregator.ClasspathReducerLoader;
+import io.eventlens.core.aggregator.ReducerRegistry;
 import io.eventlens.core.audit.AuditLogger;
-import io.eventlens.core.engine.*;
+import io.eventlens.core.engine.AnomalyDetector;
+import io.eventlens.core.engine.BisectEngine;
+import io.eventlens.core.engine.DiffEngine;
+import io.eventlens.core.engine.ExportEngine;
+import io.eventlens.core.engine.ReplayEngine;
+import io.eventlens.core.model.StoredEvent;
+import io.eventlens.core.plugin.PluginDiscovery;
+import io.eventlens.core.plugin.PluginManager;
+import io.eventlens.core.spi.EventStoreReader;
 import io.eventlens.core.spi.ResilientEventStoreReader;
-import io.eventlens.kafka.*;
-import io.eventlens.pg.*;
+import io.eventlens.kafka.KafkaStreamAdapterPlugin;
+import io.eventlens.pg.PostgresEventSourcePlugin;
+import io.eventlens.spi.Event;
+import io.eventlens.spi.EventSourcePlugin;
+import io.eventlens.spi.StreamAdapterPlugin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @Command(name = "serve", description = "Start the EventLens web server")
 public class ServeCommand implements Runnable {
@@ -50,38 +65,28 @@ public class ServeCommand implements Runnable {
 
     @Override
     public void run() {
-        EventLensConfig config = configPath != null
-                ? ConfigLoader.load(configPath)
-                : ConfigLoader.load();
+        EventLensConfig config = configPath != null ? ConfigLoader.load(configPath) : ConfigLoader.load();
 
-        // CLI flags override config file
-        if (port != null)
-            config.getServer().setPort(port);
-        if (dbUrl != null)
-            config.getDatasource().setUrl(dbUrl);
-        if (dbUser != null)
-            config.getDatasource().setUsername(dbUser);
-        if (dbPassword != null)
-            config.getDatasource().setPassword(dbPassword);
-        if (tableName != null)
-            config.getDatasource().setTable(tableName);
+        if (port != null) config.getServer().setPort(port);
+        if (dbUrl != null) config.getDatasource().setUrl(dbUrl);
+        if (dbUser != null) config.getDatasource().setUsername(dbUser);
+        if (dbPassword != null) config.getDatasource().setPassword(dbPassword);
+        if (tableName != null) config.getDatasource().setTable(tableName);
 
         ConfigValidator.validateOrThrow(config);
 
-        var pgConfig = new PgConfig(
-                config.getDatasource().getUrl(),
-                config.getDatasource().getUsername(),
-                config.getDatasource().getPassword(),
-                config.getDatasource().getTable(),
-                config.getDatasource().getColumns(), // Fix 1: pass column overrides
-                config.getDatasource().getPool(),
-                config.getDatasource().getQueryTimeoutSeconds());
+        PluginManager pluginManager = new PluginManager(config.getPlugins().getHealthCheckIntervalSeconds());
+        registerBuiltInPlugins(config, pluginManager);
+        pluginManager.startHealthChecks();
 
-        var rawReader = new PgEventStoreReader(pgConfig);
-        var reader = new ResilientEventStoreReader(rawReader);
+        EventSourcePlugin sourcePlugin = pluginManager.getFirstReadyEventSource()
+                .orElseThrow(() -> new IllegalStateException("No ready event source plugin found"));
+        if (!(sourcePlugin instanceof EventStoreReader sourceReader)) {
+            throw new IllegalStateException("Selected event source plugin does not implement EventStoreReader: " + sourcePlugin.getClass().getName());
+        }
+
+        var reader = new ResilientEventStoreReader(sourceReader);
         var registry = new ReducerRegistry();
-
-        // Load custom reducers from classpath JARs
         if (classpathJars != null && !classpathJars.isEmpty()) {
             var loader = new ClasspathReducerLoader();
             loader.loadAll(registry, classpathJars, config.getReplay().getReducers());
@@ -89,47 +94,95 @@ public class ServeCommand implements Runnable {
 
         var replayEngine = new ReplayEngine(reader, registry);
         var bisectEngine = new BisectEngine(replayEngine, reader);
-        var anomalyDetector = new AnomalyDetector(reader, replayEngine, config.getAnomaly()); // Fix 11
+        var anomalyDetector = new AnomalyDetector(reader, replayEngine, config.getAnomaly());
         var exportEngine = new ExportEngine(reader, replayEngine);
         var diffEngine = new DiffEngine(replayEngine);
 
-        // Kafka is optional — graceful degradation to PG polling
-        KafkaLiveTail kafkaTail = null;
-        String brokers = kafkaBrokers != null ? kafkaBrokers
-                : (config.getKafka() != null ? config.getKafka().getBootstrapServers() : null);
-        String topic = kafkaTopic != null ? kafkaTopic
-                : (config.getKafka() != null ? config.getKafka().getTopic() : null);
-
-        if (brokers != null && topic != null) {
-            try {
-                kafkaTail = new KafkaLiveTail(new KafkaConfig(brokers, topic));
-                log.info("Kafka consumer connected to topic: {}", topic);
-            } catch (Exception e) {
-                log.warn("Kafka unavailable ({}) — using PostgreSQL polling fallback", e.getMessage());
-            }
-        }
-
-        var server = new EventLensServer(config, reader, replayEngine,
-                bisectEngine, anomalyDetector, exportEngine, diffEngine);
-        // LiveTailWebSocket is wired and configured inside EventLensServer (v2).
-        // We still need a reference here for Kafka listener wiring.
+        var server = new EventLensServer(config, reader, replayEngine, bisectEngine, anomalyDetector, exportEngine, diffEngine);
         var auditLogger = new AuditLogger(config.getAudit().isEnabled());
         var liveTail = new LiveTailWebSocket(reader, auditLogger);
 
-        if (kafkaTail != null) {
-            kafkaTail.addListener(liveTail::broadcast);
-            kafkaTail.start();
-        } else {
-            liveTail.startPolling();
-        }
+        pluginManager.getFirstReadyStreamAdapter().ifPresentOrElse(
+                stream -> startStreaming(stream, liveTail),
+                liveTail::startPolling);
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                pluginManager.close();
+            } catch (Exception e) {
+                log.warn("Failed to close plugin manager cleanly", e);
+            }
+        }, "eventlens-plugin-shutdown"));
 
         server.start();
 
-        // Block the main thread to keep the JVM alive (Javalin runs on daemon threads)
         try {
             Thread.currentThread().join();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private void registerBuiltInPlugins(EventLensConfig config, PluginManager pluginManager) {
+        PluginDiscovery discovery = new PluginDiscovery();
+        PluginDiscovery.DiscoveryResult discovered = discovery.discoverFromClasspath()
+                .merge(discovery.discoverFromDirectory(config.getPlugins().getDirectory()));
+
+        EventSourcePlugin postgres = discovered.eventSources().stream()
+                .filter(plugin -> "postgres".equals(plugin.typeId()))
+                .findFirst()
+                .orElseGet(PostgresEventSourcePlugin::new);
+        pluginManager.registerEventSource("default", postgres, postgresConfig(config));
+
+        String brokers = kafkaBrokers != null ? kafkaBrokers : config.getKafka() != null ? config.getKafka().getBootstrapServers() : null;
+        String topic = kafkaTopic != null ? kafkaTopic : config.getKafka() != null ? config.getKafka().getTopic() : null;
+        if (brokers != null && topic != null) {
+            StreamAdapterPlugin kafka = discovered.streamAdapters().stream()
+                    .filter(plugin -> "kafka".equals(plugin.typeId()))
+                    .findFirst()
+                    .orElseGet(KafkaStreamAdapterPlugin::new);
+            try {
+                pluginManager.registerStreamAdapter("default-kafka", kafka, Map.of(
+                        "bootstrapServers", brokers,
+                        "topic", topic));
+                log.info("Kafka stream adapter registered for topic: {}", topic);
+            } catch (Exception e) {
+                log.warn("Kafka unavailable ({}) - using PostgreSQL polling fallback", e.getMessage());
+            }
+        }
+    }
+
+    private Map<String, Object> postgresConfig(EventLensConfig config) {
+        Map<String, Object> sourceConfig = new HashMap<>();
+        sourceConfig.put("jdbcUrl", config.getDatasource().getUrl());
+        sourceConfig.put("username", config.getDatasource().getUsername());
+        sourceConfig.put("password", config.getDatasource().getPassword());
+        sourceConfig.put("tableName", config.getDatasource().getTable());
+        sourceConfig.put("columnOverrides", config.getDatasource().getColumns());
+        sourceConfig.put("pool", config.getDatasource().getPool());
+        sourceConfig.put("queryTimeoutSeconds", config.getDatasource().getQueryTimeoutSeconds());
+        return sourceConfig;
+    }
+
+    private void startStreaming(StreamAdapterPlugin streamAdapter, LiveTailWebSocket liveTail) {
+        try {
+            streamAdapter.subscribe(event -> liveTail.broadcast(toStoredEvent(event)));
+        } catch (Exception e) {
+            log.warn("Stream adapter subscribe failed ({}); using PostgreSQL polling fallback", e.getMessage());
+            liveTail.startPolling();
+        }
+    }
+
+    private StoredEvent toStoredEvent(Event event) {
+        return new StoredEvent(
+                event.eventId(),
+                event.aggregateId(),
+                event.aggregateType(),
+                event.sequenceNumber(),
+                event.eventType(),
+                io.eventlens.core.JsonUtil.toJson(event.payload()),
+                io.eventlens.core.JsonUtil.toJson(event.metadata()),
+                event.timestamp(),
+                event.globalPosition());
     }
 }
