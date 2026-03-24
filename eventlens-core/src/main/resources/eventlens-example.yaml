@@ -1,0 +1,98 @@
+# EventLens Configuration Example
+# This file shows all available configuration options with their defaults
+
+version: "3.0.0"
+
+server:
+  port: 9090
+  allowed-origins:
+    - http://localhost:5173
+    - http://localhost:9090
+  cors-max-age-seconds: 600
+  auth:
+    enabled: false
+    username: admin
+    password: changeme
+  security:
+    rate-limit:
+      enabled: false
+      requests-per-minute: 120
+      burst: 20
+
+# Plugin system configuration (v3)
+plugins:
+  # Directory containing external plugin JARs
+  # Supports environment variable interpolation: ${PLUGINS_DIR:-./plugins}
+  directory: ./plugins
+  
+  # How often to check plugin health (seconds)
+  health-check-interval-seconds: 30
+
+datasource:
+  url: jdbc:postgresql://localhost:5432/eventlens_dev
+  username: postgres
+  password: ""
+  table: null  # null = auto-detect
+  query-timeout-seconds: 30
+  
+  # Optional: explicit column name overrides
+  columns:
+    event-id: null
+    aggregate-id: null
+    aggregate-type: null
+    sequence: null
+    event-type: null
+    payload: null
+    metadata: null
+    timestamp: null
+    global-position: null
+  
+  pool:
+    maximum-pool-size: 10
+    minimum-idle: 2
+    connection-timeout-ms: 5000
+    idle-timeout-ms: 300000
+    max-lifetime-ms: 900000
+    leak-detection-threshold-ms: 30000
+
+kafka:
+  bootstrap-servers: null  # null = Kafka disabled
+  topic: domain-events
+
+replay:
+  default-reducer: generic
+  reducers: {}
+
+anomaly:
+  scan-interval-seconds: 60
+  max-aggregates-per-scan: 20
+  rules: []
+
+ui:
+  theme: dark
+
+audit:
+  enabled: true
+
+data-protection:
+  pii:
+    enabled: false
+    patterns:
+      - name: email
+        regex: "[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}"
+        mask: "***@***.***"
+      - name: credit-card
+        regex: "\\b\\d{4}[- ]?\\d{4}[- ]?\\d{4}[- ]?\\d{4}\\b"
+        mask: "****-****-****-****"
+      - name: phone
+        regex: "\\+?[1-9]\\d{7,14}"
+        mask: "***-***-****"
+      - name: ssn
+        regex: "\\d{3}-\\d{2}-\\d{4}"
+        mask: "***-**-****"
+
+export:
+  directory: ./exports
+  max-concurrent: 2
+  max-events-per-export: 100000
+  expire-after-seconds: 3600

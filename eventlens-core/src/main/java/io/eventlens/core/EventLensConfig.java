@@ -18,6 +18,7 @@ public class EventLensConfig {
     private AuditConfig audit = new AuditConfig();
     private DataProtectionConfig dataProtection = new DataProtectionConfig();
     private ExportConfig export = new ExportConfig();
+    private PluginsConfig plugins = new PluginsConfig();
     private String version = "2.0.0";
 
     // ── Getters / Setters ──────────────────────────────────────────────
@@ -92,6 +93,14 @@ public class EventLensConfig {
 
     public void setExport(ExportConfig export) {
         this.export = export;
+    }
+
+    public PluginsConfig getPlugins() {
+        return plugins;
+    }
+
+    public void setPlugins(PluginsConfig plugins) {
+        this.plugins = plugins;
     }
 
     public String getVersion() {
@@ -344,6 +353,29 @@ public class EventLensConfig {
 
         public void setLeakDetectionThresholdMs(long leakDetectionThresholdMs) {
             this.leakDetectionThresholdMs = leakDetectionThresholdMs;
+        }
+    }
+
+    // ── Plugins ──────────────────────────────────────────────────────────
+
+    public static class PluginsConfig {
+        private String directory = "./plugins";
+        private int healthCheckIntervalSeconds = 30;
+
+        public String getDirectory() {
+            return directory;
+        }
+
+        public void setDirectory(String directory) {
+            this.directory = directory;
+        }
+
+        public int getHealthCheckIntervalSeconds() {
+            return healthCheckIntervalSeconds;
+        }
+
+        public void setHealthCheckIntervalSeconds(int healthCheckIntervalSeconds) {
+            this.healthCheckIntervalSeconds = healthCheckIntervalSeconds;
         }
     }
 
