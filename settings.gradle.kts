@@ -1,7 +1,8 @@
 rootProject.name = "eventlens"
 
 include(
-    "eventlens-core",      // Domain model, engines, SPI
+    "eventlens-spi",       // Plugin interfaces and shared types
+    "eventlens-core",      // Domain model and engines
     "eventlens-pg",        // PostgreSQL reader
     "eventlens-kafka",     // Kafka consumer (optional)
     "eventlens-api",       // REST + WebSocket
