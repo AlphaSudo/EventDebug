@@ -129,12 +129,23 @@ public class ServeCommand implements Runnable {
     private void registerDatasources(EventLensConfig config, PluginManager pluginManager, PluginDiscovery.DiscoveryResult discovered) {
         for (EventLensConfig.DatasourceInstanceConfig ds : config.getDatasourcesOrLegacy()) {
             if (ds == null || !ds.isEnabled()) continue;
-            EventSourcePlugin plugin = discovered.eventSources().stream()
-                    .filter(candidate -> ds.getType().equalsIgnoreCase(candidate.typeId()))
-                    .findFirst()
-                    .orElseGet(() -> createBuiltinDatasource(ds.getType()));
+            // Always create a fresh plugin instance per datasource to avoid shared state.
+            // The discovered list is only used to verify the type is supported.
+            boolean supported = discovered.eventSources().stream()
+                    .anyMatch(candidate -> ds.getType().equalsIgnoreCase(candidate.typeId()));
+            EventSourcePlugin plugin = supported || isBuiltinType(ds.getType())
+                    ? createBuiltinDatasource(ds.getType())
+                    : discovered.eventSources().stream()
+                            .filter(candidate -> ds.getType().equalsIgnoreCase(candidate.typeId()))
+                            .findFirst()
+                            .orElseThrow(() -> new IllegalArgumentException(
+                                    "Unsupported datasource type: " + ds.getType()));
             pluginManager.registerEventSource(ds.getId(), plugin, datasourceConfig(ds));
         }
+    }
+
+    private boolean isBuiltinType(String type) {
+        return "postgres".equalsIgnoreCase(type) || "mysql".equalsIgnoreCase(type);
     }
 
     private void registerStreams(EventLensConfig config, PluginManager pluginManager, PluginDiscovery.DiscoveryResult discovered) {
