@@ -20,9 +20,12 @@ COPY settings.gradle.kts build.gradle.kts gradlew gradlew.bat ./
 COPY gradle ./gradle
 
 # Project sources
+COPY eventlens-spi ./eventlens-spi
 COPY eventlens-core ./eventlens-core
-COPY eventlens-pg ./eventlens-pg
-COPY eventlens-kafka ./eventlens-kafka
+COPY eventlens-source-postgres ./eventlens-source-postgres
+COPY eventlens-source-mysql ./eventlens-source-mysql
+COPY eventlens-stream-kafka ./eventlens-stream-kafka
+COPY eventlens-plugin-test ./eventlens-plugin-test
 COPY eventlens-api ./eventlens-api
 COPY eventlens-cli ./eventlens-cli
 COPY eventlens-ui ./eventlens-ui
