@@ -12,6 +12,7 @@ import {
     getHealth,
     getPlugins,
     getRecentEvents,
+    getTimeline,
     getTransitions,
     type DatasourceHealth,
     type DatasourceSummary,
@@ -62,7 +63,7 @@ function statusTone(status: string) {
 
 function isSelectableDatasource(status: string) {
     const normalized = status.toLowerCase();
-    return normalized === 'ready' || normalized === 'degraded';
+    return normalized === 'ready';
 }
 
 function ConnectionStats({ isUp, source }: { isUp: boolean; source?: string | null }) {
@@ -402,13 +403,13 @@ export default function App() {
         setSelectedSequence(null);
     };
 
-    const { data: transitions } = useQuery({
-        queryKey: ['transitions', selectedAggregate, selectedSource || 'default'],
-        queryFn: () => getTransitions(selectedAggregate!, selectedSource || null),
+    const { data: timelineSummary } = useQuery({
+        queryKey: ['timeline-summary', selectedAggregate, selectedSource || 'default'],
+        queryFn: () => getTimeline(selectedAggregate!, 500, 0, selectedSource || null, 'metadata'),
         enabled: !!selectedAggregate,
         staleTime: 30_000,
     });
-    const totalEvents = transitions?.length ?? 0;
+    const totalEvents = timelineSummary?.totalEvents ?? 0;
 
     const pluginView = currentHash === '#/plugins';
 

@@ -167,7 +167,7 @@ public class TimelineRoutes {
                         event.aggregateType(),
                         event.sequenceNumber(),
                         event.eventType(),
-                        "{}",
+                        null,
                         event.metadata(),
                         event.timestamp(),
                         event.globalPosition()))
@@ -250,3 +250,4 @@ public class TimelineRoutes {
     private record TimelineEnvelope(AggregateTimeline timeline, boolean hasMore, String nextCursor) {
     }
 }
+

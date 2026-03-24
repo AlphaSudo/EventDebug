@@ -7,5 +7,10 @@ dependencies {
     implementation("io.micrometer:micrometer-core:1.15.0")
     implementation("io.micrometer:micrometer-registry-prometheus:1.15.0")
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.21.1")
+    testImplementation(project(":eventlens-source-postgres"))
+    testImplementation(project(":eventlens-source-mysql"))
+    testImplementation("org.testcontainers:junit-jupiter:1.20.1")
+    testImplementation("org.testcontainers:postgresql:1.20.1")
+    testImplementation("org.testcontainers:mysql:1.20.1")
 }
 

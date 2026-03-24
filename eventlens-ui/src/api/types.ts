@@ -4,7 +4,7 @@ export interface StoredEvent {
     aggregateType: string;
     sequenceNumber: number;
     eventType: string;
-    payload: string;
+    payload: string | null;
     metadata: string;
     timestamp: string;
     globalPosition: number;

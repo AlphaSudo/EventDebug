@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { getTransitions } from '../api/client';
+import { getTimeline } from '../api/client';
 
 export function useTimeline(aggregateId: string, source?: string | null) {
     return useQuery({
-        queryKey: ['transitions', aggregateId, source ?? 'default'],
-        queryFn: () => getTransitions(aggregateId, source),
+        queryKey: ['timeline', aggregateId, source ?? 'default', 'metadata'],
+        queryFn: () => getTimeline(aggregateId, 500, 0, source, 'metadata'),
     });
 }
