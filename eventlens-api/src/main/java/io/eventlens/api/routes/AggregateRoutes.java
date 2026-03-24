@@ -1,47 +1,61 @@
 package io.eventlens.api.routes;
 
+import io.eventlens.api.cache.QueryResultCache;
 import io.eventlens.api.http.ConditionalGet;
+import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.core.InputValidator;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.http.Context;
 
+import java.time.Duration;
 import java.util.Map;
 
 /**
  * Aggregate search, type listing, and recent event endpoints.
  *
- * <p>v2 — emits {@link AuditEvent#ACTION_SEARCH} audit entries for every
+ * <p>v2 - emits {@link AuditEvent#ACTION_SEARCH} audit entries for every
  * search request.
  */
 public class AggregateRoutes {
 
-    /** Hard cap on any client-supplied limit to prevent unbounded DB queries. */
     private static final int MAX_LIMIT = 1_000;
 
-    private final EventStoreReader reader;
+    private final SourceRegistry sourceRegistry;
     private final AuditLogger auditLogger;
+    private final QueryResultCache queryCache;
+    private final Duration searchTtl;
 
-    public AggregateRoutes(EventStoreReader reader, AuditLogger auditLogger) {
-        this.reader      = reader;
+    public AggregateRoutes(
+            SourceRegistry sourceRegistry,
+            AuditLogger auditLogger,
+            QueryResultCache queryCache,
+            Duration searchTtl) {
+        this.sourceRegistry = sourceRegistry;
         this.auditLogger = auditLogger;
+        this.queryCache = queryCache;
+        this.searchTtl = searchTtl;
     }
 
-    /** GET /api/aggregates/search?q=ACC&limit=20 */
     public void search(Context ctx) {
         String query = ctx.queryParam("q");
         if (query == null || query.isBlank()) {
             ctx.status(400).json(Map.of("error", "Missing query parameter: q"));
             return;
         }
+
         int limit = Math.min(
                 InputValidator.validateLimit(ctx.queryParam("limit"), 20, MAX_LIMIT),
                 MAX_LIMIT);
+        var source = sourceRegistry.resolve(ctx.queryParam("source"));
 
-        var result = reader.searchAggregates(query, limit);
+        var result = queryCache.getOrCompute(
+                "aggregate-search",
+                source.id() + "|" + query + "|" + limit,
+                searchTtl,
+                () -> source.reader().searchAggregates(query, limit));
 
-        // 1.8 — audit
         auditLogger.log(AuditEvent.builder()
                 .action(AuditEvent.ACTION_SEARCH)
                 .resourceType(AuditEvent.RT_AGGREGATE)
@@ -50,26 +64,28 @@ public class AggregateRoutes {
                 .clientIp(clientIp(ctx))
                 .requestId(requestId(ctx))
                 .userAgent(ctx.userAgent())
-                .details(Map.of("q", query, "limit", limit, "resultCount", result.size()))
+                .details(Map.of(
+                        "q", query,
+                        "limit", limit,
+                        "source", source.id(),
+                        "resultCount", result.size()))
                 .build());
 
         ConditionalGet.json(ctx, result);
     }
 
-    /** GET /api/meta/types */
     public void types(Context ctx) {
+        EventStoreReader reader = sourceRegistry.resolve(ctx.queryParam("source")).reader();
         ConditionalGet.json(ctx, reader.getAggregateTypes());
     }
 
-    /** GET /api/events/recent?limit=50 */
     public void recentEvents(Context ctx) {
         int limit = Math.min(
                 InputValidator.validateLimit(ctx.queryParam("limit"), 50, MAX_LIMIT),
                 MAX_LIMIT);
+        EventStoreReader reader = sourceRegistry.resolve(ctx.queryParam("source")).reader();
         ConditionalGet.json(ctx, reader.getRecentEvents(limit));
     }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
 
     private static String userId(Context ctx) {
         String v = ctx.attribute("auditUserId");

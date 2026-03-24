@@ -3,82 +3,68 @@ package io.eventlens.api.routes;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import io.eventlens.core.InputValidator;
+import io.eventlens.api.cache.QueryResultCache;
 import io.eventlens.api.http.ConditionalGet;
+import io.eventlens.api.source.SourceRegistry;
+import io.eventlens.core.InputValidator;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
-import io.eventlens.core.engine.ReplayEngine;
-import io.eventlens.core.pagination.CursorCodec;
 import io.eventlens.core.model.AggregateTimeline;
 import io.eventlens.core.model.StoredEvent;
+import io.eventlens.core.pagination.CursorCodec;
 import io.eventlens.core.pii.PiiMasker;
 import io.javalin.http.Context;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Timeline, replay, and state transition endpoints.
- *
- * <p>v2 additions:
- * <ul>
- *   <li><b>1.8</b> — emits {@link AuditEvent#ACTION_VIEW_TIMELINE} on every
- *       timeline fetch.</li>
- *   <li><b>1.9</b> — passes event payloads through {@link PiiMasker} before
- *       returning them to the client.</li>
- * </ul>
  */
 public class TimelineRoutes {
 
-    /** Hard cap on any client-supplied limit to prevent unbounded DB queries. */
     private static final int MAX_LIMIT = 1_000;
 
-    private final ReplayEngine replayEngine;
-    private final AuditLogger  auditLogger;
-    private final PiiMasker    piiMasker;
+    private final SourceRegistry sourceRegistry;
+    private final AuditLogger auditLogger;
+    private final PiiMasker piiMasker;
+    private final QueryResultCache queryCache;
+    private final Duration timelineTtl;
     private final ObjectMapper mapper;
 
-    public TimelineRoutes(ReplayEngine replayEngine,
-                          AuditLogger auditLogger,
-                          PiiMasker piiMasker) {
-        this.replayEngine = replayEngine;
-        this.auditLogger  = auditLogger;
-        this.piiMasker    = piiMasker;
+    public TimelineRoutes(
+            SourceRegistry sourceRegistry,
+            AuditLogger auditLogger,
+            PiiMasker piiMasker,
+            QueryResultCache queryCache,
+            Duration timelineTtl) {
+        this.sourceRegistry = sourceRegistry;
+        this.auditLogger = auditLogger;
+        this.piiMasker = piiMasker;
+        this.queryCache = queryCache;
+        this.timelineTtl = timelineTtl;
         this.mapper = new ObjectMapper()
                 .findAndRegisterModules()
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
-    /** GET /api/aggregates/{id}/timeline */
     public void getTimeline(Context ctx) {
-        String id    = InputValidator.validateAggregateId(ctx.pathParam("id"));
-        int    limit = Math.min(
+        String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
+        int limit = Math.min(
                 InputValidator.validateLimit(ctx.queryParam("limit"), 500, MAX_LIMIT),
                 MAX_LIMIT);
         String cursorParam = ctx.queryParam("cursor");
         int offset = InputValidator.validateOffset(ctx.queryParam("offset"));
+        String fields = normalizeFields(ctx.queryParam("fields"));
+        var source = sourceRegistry.resolve(ctx.queryParam("source"));
 
-        AggregateTimeline timeline;
-        boolean hasMore = false;
-        String nextCursor = null;
+        TimelineEnvelope envelope = queryCache.getOrCompute(
+                "timeline",
+                source.id() + "|" + id + "|" + limit + "|" + offset + "|" + fields + "|" + (cursorParam == null ? "" : cursorParam),
+                timelineTtl,
+                () -> buildTimelineEnvelope(source, id, limit, offset, cursorParam, fields));
 
-        if (cursorParam != null && !cursorParam.isBlank()) {
-            var cursor = CursorCodec.decode(cursorParam);
-            var page = replayEngine.buildTimelineAfter(id, limit, cursor.sequence());
-            timeline = new AggregateTimeline(page.aggregateId(), page.aggregateType(), page.events(), page.totalEvents());
-            hasMore = page.hasMore();
-            if (!page.events().isEmpty()) {
-                var last = page.events().getLast();
-                nextCursor = CursorCodec.encode(last.sequenceNumber(), last.timestamp());
-            }
-        } else {
-            timeline = replayEngine.buildTimeline(id, limit, offset);
-        }
-
-        // 1.9 — apply PII masking on each event payload
-        AggregateTimeline masked = maskTimeline(timeline);
-
-        // 1.8 — audit
         auditLogger.log(AuditEvent.builder()
                 .action(AuditEvent.ACTION_VIEW_TIMELINE)
                 .resourceType(AuditEvent.RT_AGGREGATE)
@@ -92,52 +78,112 @@ public class TimelineRoutes {
                         "limit", limit,
                         "offset", offset,
                         "cursor", cursorParam != null ? cursorParam : "",
-                        "eventCount", masked.events().size()))
+                        "fields", fields,
+                        "source", source.id(),
+                        "eventCount", envelope.timeline().events().size()))
                 .build());
 
-        Object response = nextCursor != null
-                ? Map.of(
-                "aggregateId", masked.aggregateId(),
-                "aggregateType", masked.aggregateType(),
-                "events", masked.events(),
-                "totalEvents", masked.totalEvents(),
-                "pagination", Map.of(
-                        "limit", limit,
-                        "hasMore", hasMore,
-                        "nextCursor", nextCursor
-                ))
-                : masked;
-        ConditionalGet.json(ctx, response);
+        if (envelope.nextCursor() != null) {
+            ConditionalGet.json(ctx, Map.of(
+                    "aggregateId", envelope.timeline().aggregateId(),
+                    "aggregateType", envelope.timeline().aggregateType(),
+                    "events", envelope.timeline().events(),
+                    "totalEvents", envelope.timeline().totalEvents(),
+                    "pagination", Map.of(
+                            "limit", limit,
+                            "hasMore", envelope.hasMore(),
+                            "nextCursor", envelope.nextCursor()
+                    )
+            ));
+            return;
+        }
+
+        ConditionalGet.json(ctx, envelope.timeline());
     }
 
-    /** GET /api/aggregates/{id}/replay */
     public void replay(Context ctx) {
         String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
-        ctx.json(replayEngine.replayFull(id));
+        var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        ctx.json(source.replayEngine().replayFull(id));
     }
 
-    /** GET /api/aggregates/{id}/replay/{seq} */
     public void replayTo(Context ctx) {
-        String id  = InputValidator.validateAggregateId(ctx.pathParam("id"));
-        long   seq = Long.parseLong(ctx.pathParam("seq"));
-        ctx.json(replayEngine.replayTo(id, seq));
+        String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
+        long seq = Long.parseLong(ctx.pathParam("seq"));
+        var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        ctx.json(source.replayEngine().replayTo(id, seq));
     }
 
-    /** GET /api/aggregates/{id}/transitions */
     public void transitions(Context ctx) {
         String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
-        ctx.json(replayEngine.replayFull(id));
+        var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        ctx.json(source.replayEngine().replayFull(id));
     }
 
-    // ── PII masking ──────────────────────────────────────────────────────────
+    private TimelineEnvelope buildTimelineEnvelope(
+            SourceRegistry.ResolvedSource source,
+            String aggregateId,
+            int limit,
+            int offset,
+            String cursorParam,
+            String fields) {
+        AggregateTimeline timeline;
+        boolean hasMore = false;
+        String nextCursor = null;
 
-    /**
-     * Returns a new {@link AggregateTimeline} whose events have their payload
-     * fields masked.  If masking is disabled the original object is returned
-     * unchanged (no copy).
-     */
+        if (cursorParam != null && !cursorParam.isBlank()) {
+            var cursor = CursorCodec.decode(cursorParam);
+            var page = source.replayEngine().buildTimelineAfter(aggregateId, limit, cursor.sequence());
+            timeline = new AggregateTimeline(page.aggregateId(), page.aggregateType(), page.events(), page.totalEvents());
+            hasMore = page.hasMore();
+            if (!page.events().isEmpty()) {
+                var last = page.events().getLast();
+                nextCursor = CursorCodec.encode(last.sequenceNumber(), last.timestamp());
+            }
+        } else {
+            timeline = source.replayEngine().buildTimeline(aggregateId, limit, offset);
+        }
+
+        AggregateTimeline masked = maskTimeline(timeline);
+        AggregateTimeline shaped = "metadata".equals(fields) ? metadataOnly(masked) : masked;
+        return new TimelineEnvelope(shaped, hasMore, nextCursor);
+    }
+
+    private String normalizeFields(String fields) {
+        if (fields == null || fields.isBlank()) {
+            return "full";
+        }
+        if (!fields.equals("full") && !fields.equals("metadata")) {
+            throw new IllegalArgumentException("Unsupported fields value: " + fields);
+        }
+        return fields;
+    }
+
+    private AggregateTimeline metadataOnly(AggregateTimeline timeline) {
+        List<StoredEvent> events = timeline.events().stream()
+                .map(event -> new StoredEvent(
+                        event.eventId(),
+                        event.aggregateId(),
+                        event.aggregateType(),
+                        event.sequenceNumber(),
+                        event.eventType(),
+                        "{}",
+                        event.metadata(),
+                        event.timestamp(),
+                        event.globalPosition()))
+                .toList();
+
+        return new AggregateTimeline(
+                timeline.aggregateId(),
+                timeline.aggregateType(),
+                events,
+                timeline.totalEvents());
+    }
+
     private AggregateTimeline maskTimeline(AggregateTimeline timeline) {
-        if (timeline == null || timeline.events() == null) return timeline;
+        if (timeline == null || timeline.events() == null) {
+            return timeline;
+        }
 
         List<StoredEvent> maskedEvents = timeline.events().stream()
                 .map(this::maskEvent)
@@ -147,17 +193,20 @@ public class TimelineRoutes {
                 timeline.aggregateId(),
                 timeline.aggregateType(),
                 maskedEvents,
-                timeline.totalEvents()
-        );
+                timeline.totalEvents());
     }
 
     private StoredEvent maskEvent(StoredEvent event) {
-        if (event == null || event.payload() == null) return event;
+        if (event == null || event.payload() == null) {
+            return event;
+        }
         try {
             String raw = event.payload();
             JsonNode tree = mapper.readTree(raw);
             JsonNode maskedTree = piiMasker.mask(tree, raw);
-            if (maskedTree == tree) return event; // nothing changed — return original
+            if (maskedTree == tree) {
+                return event;
+            }
             return new StoredEvent(
                     event.eventId(),
                     event.aggregateId(),
@@ -167,15 +216,11 @@ public class TimelineRoutes {
                     mapper.writeValueAsString(maskedTree),
                     event.metadata(),
                     event.timestamp(),
-                    event.globalPosition()
-            );
+                    event.globalPosition());
         } catch (Exception e) {
-            // If JSON parsing fails, return the event unmasked rather than failing the request
             return event;
         }
     }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
 
     private static String userId(Context ctx) {
         String v = ctx.attribute("auditUserId");
@@ -200,5 +245,8 @@ public class TimelineRoutes {
     private static String requestId(Context ctx) {
         String v = ctx.attribute("requestId");
         return v != null ? v : "unknown";
+    }
+
+    private record TimelineEnvelope(AggregateTimeline timeline, boolean hasMore, String nextCursor) {
     }
 }

@@ -7,6 +7,7 @@ interface Props {
     aggregateId: string;
     selectedSequence: number | null;
     onSelectEvent: (seq: number) => void;
+    source?: string | null;
 }
 
 const MIN_SAME_TYPE_RUN = 4;
@@ -90,8 +91,8 @@ function StepButton({ transition, stepNumber, selectedSequence, onSelectEvent, c
     );
 }
 
-export default function Timeline({ aggregateId, selectedSequence, onSelectEvent }: Props) {
-    const { data: transitions, isLoading } = useTimeline(aggregateId);
+export default function Timeline({ aggregateId, selectedSequence, onSelectEvent, source }: Props) {
+    const { data: transitions, isLoading } = useTimeline(aggregateId, source);
     const [expandedGroupKey, setExpandedGroupKey] = useState<string | null>(null);
     const [jumpInput, setJumpInput] = useState('');
     const [filterType, setFilterType] = useState<string>('');
@@ -437,3 +438,5 @@ function GroupSummaryChip({
         </button>
     );
 }
+
+

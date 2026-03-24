@@ -85,7 +85,8 @@ public class ServeCommand implements Runnable {
         registerStreams(config, pluginManager, discovered);
         pluginManager.startHealthChecks();
 
-        EventStoreReader sourceReader = selectPrimaryReader(config, pluginManager);
+        String primaryDatasourceId = selectPrimaryDatasourceId(config, pluginManager);
+        EventStoreReader sourceReader = selectReader(primaryDatasourceId, pluginManager);
         var reader = new ResilientEventStoreReader(sourceReader);
         var registry = new ReducerRegistry();
         if (classpathJars != null && !classpathJars.isEmpty()) {
@@ -98,7 +99,7 @@ public class ServeCommand implements Runnable {
         var exportEngine = new ExportEngine(reader, replayEngine);
         var diffEngine = new DiffEngine(replayEngine);
 
-        var server = new EventLensServer(config, reader, replayEngine, bisectEngine, anomalyDetector, exportEngine, diffEngine);
+        var server = new EventLensServer(config, reader, replayEngine, registry, pluginManager, primaryDatasourceId, bisectEngine, anomalyDetector, exportEngine, diffEngine);
         var auditLogger = new AuditLogger(config.getAudit().isEnabled());
         var liveTail = new LiveTailWebSocket(reader, auditLogger);
 
@@ -155,17 +156,25 @@ public class ServeCommand implements Runnable {
         }
     }
 
-    private EventStoreReader selectPrimaryReader(EventLensConfig config, PluginManager pluginManager) {
+    private String selectPrimaryDatasourceId(EventLensConfig config, PluginManager pluginManager) {
         for (EventLensConfig.DatasourceInstanceConfig ds : config.getDatasourcesOrLegacy()) {
             var plugin = pluginManager.getEventSource(ds.getId()).orElse(null);
-            if (plugin instanceof EventStoreReader reader) {
-                return reader;
+            if (plugin instanceof EventStoreReader) {
+                return ds.getId();
             }
         }
-        return pluginManager.getFirstReadyEventSource()
+        return pluginManager.listByType(io.eventlens.core.plugin.PluginInstance.PluginType.EVENT_SOURCE).stream()
+                .filter(instance -> instance.plugin() instanceof EventStoreReader)
+                .findFirst()
+                .map(io.eventlens.core.plugin.PluginInstance::instanceId)
+                .orElseThrow(() -> new IllegalStateException("No ready event source plugin found"));
+    }
+
+    private EventStoreReader selectReader(String datasourceId, PluginManager pluginManager) {
+        return pluginManager.getEventSource(datasourceId)
                 .filter(EventStoreReader.class::isInstance)
                 .map(EventStoreReader.class::cast)
-                .orElseThrow(() -> new IllegalStateException("No ready event source plugin found"));
+                .orElseThrow(() -> new IllegalStateException("No ready event source plugin found for id: " + datasourceId));
     }
 
     private java.util.Optional<StreamAdapterPlugin> selectPrimaryStream(EventLensConfig config, PluginManager pluginManager) {
@@ -227,3 +236,4 @@ public class ServeCommand implements Runnable {
                 event.globalPosition());
     }
 }
+

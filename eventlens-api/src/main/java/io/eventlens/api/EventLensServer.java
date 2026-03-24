@@ -1,6 +1,8 @@
 package io.eventlens.api;
 
+import io.eventlens.api.cache.QueryResultCache;
 import io.eventlens.api.routes.*;
+import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.api.websocket.LiveTailWebSocket;
 import io.eventlens.api.export.ExportService;
 import io.eventlens.api.shutdown.GracefulShutdown;
@@ -8,12 +10,14 @@ import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.routes.MetricsRoutes;
 import io.eventlens.api.http.RequestContextMdcFilter;
 import io.eventlens.core.EventLensConfig;
+import io.eventlens.core.aggregator.ReducerRegistry;
 import io.eventlens.core.RateLimiter;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.*;
 import io.eventlens.core.exception.QueryTimeoutException;
 import io.eventlens.core.pii.PiiMasker;
+import io.eventlens.core.plugin.PluginManager;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.Javalin;
 import io.javalin.compression.CompressionStrategy;
@@ -22,6 +26,7 @@ import io.javalin.json.JavalinJackson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 
@@ -56,6 +61,9 @@ public class EventLensServer {
             EventLensConfig config,
             EventStoreReader reader,
             ReplayEngine replayEngine,
+            ReducerRegistry reducerRegistry,
+            PluginManager pluginManager,
+            String defaultSourceId,
             BisectEngine bisectEngine,
             AnomalyDetector anomalyDetector,
             ExportEngine exportEngine,
@@ -77,6 +85,11 @@ public class EventLensServer {
         // 4.1 Metrics: JVM binders + per-request instrumentation
         EventLensMetrics.initJvmMetrics(EventLensMetrics.registry);
 
+        var sourceRegistry = new SourceRegistry(defaultSourceId, reader, replayEngine, reducerRegistry, pluginManager);
+        var queryCache = new QueryResultCache(
+                config.getQueryCache().isEnabled(),
+                config.getQueryCache().getMaxEntries());
+
         // ── Security middleware preparation ────────────────────────────────
         var rateLimitCfg = config.getServer().getSecurity() != null
                 ? config.getServer().getSecurity().getRateLimit()
@@ -86,8 +99,12 @@ public class EventLensServer {
                 : null;
 
         // ── Route handler instances ───────────────────────────────────────
-        var aggregateRoutes    = new AggregateRoutes(reader, auditLogger);
-        var timelineRoutes     = new TimelineRoutes(replayEngine, auditLogger, piiMasker);
+        var aggregateRoutes    = new AggregateRoutes(sourceRegistry, auditLogger, queryCache,
+                Duration.ofSeconds(config.getQueryCache().getSearchTtlSeconds()));
+        var timelineRoutes     = new TimelineRoutes(sourceRegistry, auditLogger, piiMasker, queryCache,
+                Duration.ofSeconds(config.getQueryCache().getTimelineTtlSeconds()));
+        var datasourceRoutes   = new DatasourceRoutes(sourceRegistry);
+        var pluginRoutes       = new PluginRoutes(sourceRegistry);
         var bisectRoutes       = new BisectRoutes(bisectEngine);
         var anomalyRoutes      = new AnomalyRoutes(anomalyDetector, auditLogger);
         var exportRoutes       = new ExportRoutes(exportEngine, auditLogger);
@@ -299,6 +316,9 @@ public class EventLensServer {
             cfg.routes.get("/api/v1/aggregates/search", aggregateRoutes::search);
             cfg.routes.get("/api/v1/meta/types", aggregateRoutes::types);
             cfg.routes.get("/api/v1/events/recent", aggregateRoutes::recentEvents);
+            cfg.routes.get("/api/v1/datasources", datasourceRoutes::list);
+            cfg.routes.get("/api/v1/datasources/{id}/health", datasourceRoutes::health);
+            cfg.routes.get("/api/v1/plugins", pluginRoutes::list);
 
             // Legacy aggregate routes (no redirect, but marked deprecated)
             cfg.routes.get("/api/aggregates/search", ctx -> {
@@ -462,3 +482,4 @@ public class EventLensServer {
         return ctx.ip();
     }
 }
+

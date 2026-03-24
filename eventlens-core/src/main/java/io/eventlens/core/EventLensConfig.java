@@ -21,6 +21,7 @@ public class EventLensConfig {
     private DataProtectionConfig dataProtection = new DataProtectionConfig();
     private ExportConfig export = new ExportConfig();
     private PluginsConfig plugins = new PluginsConfig();
+    private QueryCacheConfig queryCache = new QueryCacheConfig();
     private String version = "2.0.0";
 
     public ServerConfig getServer() { return server; }
@@ -58,6 +59,9 @@ public class EventLensConfig {
 
     public PluginsConfig getPlugins() { return plugins; }
     public void setPlugins(PluginsConfig plugins) { this.plugins = plugins; }
+
+    public QueryCacheConfig getQueryCache() { return queryCache; }
+    public void setQueryCache(QueryCacheConfig queryCache) { this.queryCache = queryCache; }
 
     public String getVersion() { return version; }
     public void setVersion(String version) { this.version = version; }
@@ -228,6 +232,21 @@ public class EventLensConfig {
         public void setExpireAfterSeconds(int expireAfterSeconds) { this.expireAfterSeconds = expireAfterSeconds; }
     }
 
+    public static class QueryCacheConfig {
+        private boolean enabled = true;
+        private int maxEntries = 512;
+        private int searchTtlSeconds = 15;
+        private int timelineTtlSeconds = 10;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getMaxEntries() { return maxEntries; }
+        public void setMaxEntries(int maxEntries) { this.maxEntries = maxEntries; }
+        public int getSearchTtlSeconds() { return searchTtlSeconds; }
+        public void setSearchTtlSeconds(int searchTtlSeconds) { this.searchTtlSeconds = searchTtlSeconds; }
+        public int getTimelineTtlSeconds() { return timelineTtlSeconds; }
+        public void setTimelineTtlSeconds(int timelineTtlSeconds) { this.timelineTtlSeconds = timelineTtlSeconds; }
+    }
+
     public static class ColumnMappingConfig {
         private String eventId;
         private String aggregateId;
@@ -380,3 +399,4 @@ public class EventLensConfig {
         public void setMask(String mask) { this.mask = mask; }
     }
 }
+

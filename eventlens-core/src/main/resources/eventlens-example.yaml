@@ -23,6 +23,12 @@ plugins:
   directory: ./plugins
   health-check-interval-seconds: 30
 
+query-cache:
+  enabled: true
+  max-entries: 512
+  search-ttl-seconds: 15
+  timeline-ttl-seconds: 10
+
 # Preferred v3 multi-source format
 datasources:
   - id: default
@@ -101,3 +107,4 @@ export:
   max-concurrent: 2
   max-events-per-export: 100000
   expire-after-seconds: 3600
+
