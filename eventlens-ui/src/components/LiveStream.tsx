@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { StoredEvent } from '../api/client';
+import { LiveStreamUnavailableMessage, StoredEvent } from '../api/client';
 import { demoLiveStreamSeed } from '../demo/demoData';
 import { isDemoMode } from '../demo/demoMode';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -38,20 +38,49 @@ function eventIcon(t: string): string {
     return '\u25C6';
 }
 
-export default function LiveStream() {
+export default function LiveStream({ source }: { source?: string | null }) {
+    return <SourceAwareLiveStream source={source} />;
+}
+
+type LiveStreamMessage = StoredEvent | LiveStreamUnavailableMessage;
+
+function isUnavailableMessage(message: LiveStreamMessage): message is LiveStreamUnavailableMessage {
+    return 'type' in message && message.type === 'NO_LIVE_STREAM';
+}
+
+function buildSocketPath(source?: string | null) {
+    if (!source) {
+        return '/ws/live';
+    }
+    return `/ws/live?source=${encodeURIComponent(source)}`;
+}
+
+function SourceAwareLiveStream({ source }: { source?: string | null }) {
     const demo = isDemoMode();
     const [events, setEvents] = useState<StoredEvent[]>(() => (demo ? demoLiveStreamSeed() : []));
     const [paused, setPaused] = useState(false);
+    const [unavailableSource, setUnavailableSource] = useState<string | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const pausedRef = useRef(paused);
     pausedRef.current = paused;
     const { notify } = useToast();
 
-    const wsStatus = useWebSocket<StoredEvent>(
-        '/ws/live',
-        event => {
+    useEffect(() => {
+        setUnavailableSource(null);
+        setEvents(demo ? demoLiveStreamSeed() : []);
+    }, [source, demo]);
+
+    const wsStatus = useWebSocket<LiveStreamMessage>(
+        buildSocketPath(source),
+        message => {
+            if (isUnavailableMessage(message)) {
+                setUnavailableSource(message.source);
+                setEvents([]);
+                return;
+            }
+            setUnavailableSource(null);
             if (pausedRef.current) return;
-            setEvents(prev => [...prev.slice(-(BACKFILL_CAP - 1)), event]);
+            setEvents(prev => [...prev.slice(-(BACKFILL_CAP - 1)), message]);
         },
         { enabled: !demo }
     );
@@ -105,9 +134,19 @@ export default function LiveStream() {
             </div>
 
             <div className="event-stream" ref={scrollRef}>
+                {unavailableSource && (
+                    <div style={{ color: 'var(--text-muted)', padding: '20px 0', fontSize: 12, fontFamily: 'var(--font-mono)' }}>
+                        Live stream not available for this source
+                        {source ? ` (${source})` : unavailableSource ? ` (${unavailableSource})` : ''}.
+                    </div>
+                )}
                 {events.length === 0 && (
                     <div style={{ color: 'var(--text-muted)', padding: '20px 0', fontSize: 12, fontFamily: 'var(--font-mono)' }}>
-                        {demo ? 'Demo stream (static sample events)' : 'Waiting for events\u2026'}
+                        {unavailableSource
+                            ? null
+                            : demo
+                                ? 'Demo stream (static sample events)'
+                                : 'Waiting for events\u2026'}
                     </div>
                 )}
                 {events.map((e) => (

@@ -2,162 +2,185 @@ package io.eventlens.api.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import io.eventlens.api.metrics.EventLensMetrics;
+import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.model.StoredEvent;
-import io.eventlens.core.spi.EventStoreReader;
+import io.eventlens.core.plugin.PluginManager;
+import io.eventlens.spi.Event;
+import io.eventlens.spi.StreamAdapterPlugin;
 import io.javalin.websocket.WsConfig;
 import io.javalin.websocket.WsContext;
-import io.eventlens.api.metrics.EventLensMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 
 /**
- * WebSocket live tail — streams events to connected browser clients in
+ * WebSocket live tail - streams events to connected browser clients in
  * real-time.
- *
- * <p>
- * Two modes:
- * <ul>
- * <li><b>Kafka mode</b>: forwards events from KafkaLiveTail via listener
- * callback</li>
- * <li><b>Poll mode</b>: falls back to polling PostgreSQL every second when
- * Kafka is disabled</li>
- * </ul>
- *
- * <p>
- * On connect: sends the last N events as backfill so clients don't join a
- * blank screen. Backfill is sent asynchronously to avoid blocking the
- * Jetty onConnect handler thread.
- *
- * <p>v2 — emits {@link AuditEvent#ACTION_VIEW_LIVE_STREAM} on WebSocket
- * connect (1.8 Audit Logging).
  */
 public class LiveTailWebSocket {
 
     private static final Logger log = LoggerFactory.getLogger(LiveTailWebSocket.class);
     private static final int MAX_CONNECTIONS = 500;
-    /** Recent events sent on each new WebSocket connection (was 20; too small vs total store count). */
     private static final int BACKFILL_EVENT_COUNT = 100;
 
-    private final Set<WsContext> sessions = ConcurrentHashMap.newKeySet();
+    private final Map<String, Set<WsContext>> sessionsBySource = new ConcurrentHashMap<>();
+    private final Set<String> subscribedSources = ConcurrentHashMap.newKeySet();
     private final ObjectMapper mapper = new ObjectMapper()
             .findAndRegisterModules()
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-    private final EventStoreReader reader;
-    private final AuditLogger      auditLogger;
-    private final ExecutorService backfillExecutor = Executors.newCachedThreadPool(
+    private final SourceRegistry sourceRegistry;
+    private final PluginManager pluginManager;
+    private final AuditLogger auditLogger;
+    private final String defaultSourceId;
+    private final Map<String, String> sourceStreamBindings;
+    private final ExecutorService backfillExecutor = java.util.concurrent.Executors.newCachedThreadPool(
             Thread.ofVirtual().name("eventlens-backfill-", 0).factory());
 
-    public LiveTailWebSocket(EventStoreReader reader, AuditLogger auditLogger) {
-        this.reader      = reader;
+    public LiveTailWebSocket(
+            SourceRegistry sourceRegistry,
+            PluginManager pluginManager,
+            AuditLogger auditLogger,
+            String defaultSourceId,
+            Map<String, String> sourceStreamBindings) {
+        this.sourceRegistry = sourceRegistry;
+        this.pluginManager = pluginManager;
         this.auditLogger = auditLogger;
+        this.defaultSourceId = defaultSourceId;
+        this.sourceStreamBindings = sourceStreamBindings == null ? Map.of() : Map.copyOf(sourceStreamBindings);
     }
 
-    /**
-     * Set up WebSocket event handlers. The route itself is registered by
-     * the caller (EventLensServer) via {@code cfg.routes.ws("/ws/live", ...)}.
-     */
     public void configureHandlers(WsConfig ws) {
         ws.onConnect(ctx -> {
-            if (sessions.size() >= MAX_CONNECTIONS) {
+            if (totalSessions() >= MAX_CONNECTIONS) {
                 log.warn("WebSocket connection rejected: max connections ({}) reached", MAX_CONNECTIONS);
                 ctx.closeSession(1008, "Too many connections");
                 return;
             }
-            ctx.enableAutomaticPings();
-            sessions.add(ctx);
-            EventLensMetrics.setWebsocketConnections(sessions.size());
-            log.debug("WebSocket client connected: {} ({} active)", ctx.sessionId(), sessions.size());
 
-            // 1.8 — audit live-stream connection
-            String userAgent = ctx.header("User-Agent");
+            String sourceId = requestedSource(ctx);
+            ctx.attribute("eventlensSourceId", sourceId);
+            ctx.enableAutomaticPings();
+            sessionsBySource.computeIfAbsent(sourceId, ignored -> ConcurrentHashMap.newKeySet()).add(ctx);
+            EventLensMetrics.setWebsocketConnections(totalSessions());
+            log.debug("WebSocket client connected: {} on source {} ({} active)", ctx.sessionId(), sourceId, totalSessions());
+
             auditLogger.log(AuditEvent.builder()
                     .action(AuditEvent.ACTION_VIEW_LIVE_STREAM)
                     .resourceType(AuditEvent.RT_STREAM)
-                    .userId("anonymous")          // WS upgrade doesn't carry the ctx attributes
+                    .userId("anonymous")
                     .authMethod("anonymous")
                     .clientIp(extractIp(ctx))
                     .requestId("ws-" + ctx.sessionId())
-                    .userAgent(userAgent)
-                    .details(Map.of("sessionId", ctx.sessionId(),
-                            "activeSessions", sessions.size()))
+                    .userAgent(ctx.header("User-Agent"))
+                    .details(Map.of(
+                            "sessionId", ctx.sessionId(),
+                            "activeSessions", totalSessions(),
+                            "source", sourceId))
                     .build());
 
-            backfillExecutor.submit(() -> backfill(ctx));
+            Optional<StreamAdapterPlugin> streamAdapter = streamForSource(sourceId);
+            if (streamAdapter.isPresent()) {
+                ensureSubscribed(sourceId, streamAdapter.get());
+                backfillExecutor.submit(() -> backfill(ctx, sourceId));
+            } else {
+                sendControl(ctx, new ControlMessage("NO_LIVE_STREAM", sourceId));
+            }
         });
 
-        ws.onClose(ctx -> {
-            sessions.remove(ctx);
-            EventLensMetrics.setWebsocketConnections(sessions.size());
-            log.debug("WebSocket client disconnected: {}", ctx.sessionId());
-        });
-
-        ws.onError(ctx -> {
-            sessions.remove(ctx);
-            EventLensMetrics.setWebsocketConnections(sessions.size());
-            log.debug("WebSocket error for session: {}", ctx.sessionId());
-        });
+        ws.onClose(this::removeSession);
+        ws.onError(this::removeSession);
     }
 
-    private void backfill(WsContext ctx) {
+    private void backfill(WsContext ctx, String sourceId) {
         try {
             Thread.sleep(250);
-            var recent = reader.getRecentEvents(BACKFILL_EVENT_COUNT);
+            var recent = sourceRegistry.resolve(sourceId).reader().getRecentEvents(BACKFILL_EVENT_COUNT);
             for (var event : recent) {
-                if (!trySend(ctx, event)) break;
+                if (!trySend(ctx, event)) {
+                    break;
+                }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            log.debug("Backfill failed for {}: {}", ctx.sessionId(), e.getMessage());
+            log.debug("Backfill failed for {} on source {}: {}", ctx.sessionId(), sourceId, e.getMessage());
         }
     }
 
-    /** Broadcast a new event to all connected clients. */
-    public void broadcast(StoredEvent event) {
-        if (sessions.isEmpty())
+    private void ensureSubscribed(String sourceId, StreamAdapterPlugin adapter) {
+        if (!subscribedSources.add(sourceId)) {
             return;
+        }
+        adapter.subscribe(event -> broadcast(sourceId, toStoredEvent(event)));
+    }
+
+    public void broadcast(String sourceId, StoredEvent event) {
+        Set<WsContext> sessions = sessionsBySource.get(sourceId);
+        if (sessions == null || sessions.isEmpty()) {
+            return;
+        }
         sessions.removeIf(session -> !trySend(session, event));
+        EventLensMetrics.setWebsocketConnections(totalSessions());
     }
 
-    /**
-     * Start polling PostgreSQL for new events (used when Kafka is not configured).
-     * Polls every 1 second using a virtual thread scheduler.
-     */
-    public void startPolling() {
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
-                Thread.ofVirtual().name("eventlens-poll").factory());
-
-        final AtomicLong lastPosition = new AtomicLong(0);
-
-        scheduler.scheduleAtFixedRate(() -> {
-            try {
-                var events = reader.getEventsAfter(lastPosition.get(), 50);
-                for (var event : events) {
-                    broadcast(event);
-                    if (event.globalPosition() > lastPosition.get()) {
-                        lastPosition.set(event.globalPosition());
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("Live tail polling error: {}", e.getMessage());
+    private Optional<StreamAdapterPlugin> streamForSource(String sourceId) {
+        String explicit = sourceStreamBindings.get(sourceId);
+        if (explicit != null) {
+            if (explicit.isBlank()) {
+                return Optional.empty();
             }
-        }, 0, 1, TimeUnit.SECONDS);
+            return pluginManager.getStreamAdapter(explicit);
+        }
 
-        log.info("PostgreSQL polling live tail started (fallback mode)");
+        Optional<StreamAdapterPlugin> sameId = pluginManager.getStreamAdapter(sourceId);
+        if (sameId.isPresent()) {
+            return sameId;
+        }
+
+        if (defaultSourceId.equals(sourceId)) {
+            return pluginManager.getFirstReadyStreamAdapter();
+        }
+
+        return Optional.empty();
     }
 
-    /**
-     * Non-throwing send. Returns true if the message was sent successfully.
-     * In Javalin 7 we no longer have direct access to the underlying session,
-     * so we rely on try-catch to detect disconnected clients.
-     */
+    private String requestedSource(WsContext ctx) {
+        String requested = ctx.queryParam("source");
+        if (requested == null || requested.isBlank()) {
+            return defaultSourceId;
+        }
+        return sourceRegistry.resolve(requested).id();
+    }
+
+    private void removeSession(WsContext ctx) {
+        Object sourceAttr = ctx.attribute("eventlensSourceId");
+        if (sourceAttr instanceof String sourceId) {
+            Set<WsContext> sessions = sessionsBySource.get(sourceId);
+            if (sessions != null) {
+                sessions.remove(ctx);
+                if (sessions.isEmpty()) {
+                    sessionsBySource.remove(sourceId);
+                }
+            }
+        } else {
+            sessionsBySource.values().forEach(sessions -> sessions.remove(ctx));
+        }
+        EventLensMetrics.setWebsocketConnections(totalSessions());
+        log.debug("WebSocket session ended: {}", ctx.sessionId());
+    }
+
+    private int totalSessions() {
+        return sessionsBySource.values().stream().mapToInt(Set::size).sum();
+    }
+
     private boolean trySend(WsContext ctx, StoredEvent event) {
         try {
             ctx.send(mapper.writeValueAsString(event));
@@ -168,8 +191,28 @@ public class LiveTailWebSocket {
         }
     }
 
+    private void sendControl(WsContext ctx, ControlMessage message) {
+        try {
+            ctx.send(mapper.writeValueAsString(message));
+        } catch (Exception e) {
+            log.debug("WebSocket control send failed for {}: {}", ctx.sessionId(), e.getMessage());
+        }
+    }
+
+    private StoredEvent toStoredEvent(Event event) {
+        return new StoredEvent(
+                event.eventId(),
+                event.aggregateId(),
+                event.aggregateType(),
+                event.sequenceNumber(),
+                event.eventType(),
+                io.eventlens.core.JsonUtil.toJson(event.payload()),
+                io.eventlens.core.JsonUtil.toJson(event.metadata()),
+                event.timestamp(),
+                event.globalPosition());
+    }
+
     private static String extractIp(WsContext ctx) {
-        // WsContext exposes the underlying HTTP upgrade headers
         String xff = ctx.header("X-Forwarded-For");
         if (xff != null && !xff.isBlank()) {
             int c = xff.indexOf(',');
@@ -177,5 +220,8 @@ public class LiveTailWebSocket {
         }
         String xri = ctx.header("X-Real-IP");
         return xri != null && !xri.isBlank() ? xri.trim() : "unknown";
+    }
+
+    private record ControlMessage(String type, String source) {
     }
 }

@@ -501,14 +501,14 @@ export default function App() {
                                         onTabChange={setActiveTab}
                                         source={selectedSource || null}
                                     />
-                                )}
-
-                                <div className="bottom-grid">
-                                    <LiveStream />
-                                    <AnomalyPanel />
-                                </div>
-                            </>
                         )}
+
+                        <div className="bottom-grid">
+                            <LiveStream source={selectedSource || null} />
+                            <AnomalyPanel source={selectedSource || null} />
+                        </div>
+                    </>
+                )}
                 </div>
             </main>
 

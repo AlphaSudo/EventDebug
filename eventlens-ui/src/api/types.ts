@@ -81,3 +81,8 @@ export interface PluginSummary {
     lastHealthCheck: string;
     failureReason: string | null;
 }
+
+export interface LiveStreamUnavailableMessage {
+    type: 'NO_LIVE_STREAM';
+    source: string;
+}

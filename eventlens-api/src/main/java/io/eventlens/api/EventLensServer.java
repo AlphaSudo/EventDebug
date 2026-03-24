@@ -68,6 +68,21 @@ public class EventLensServer {
             AnomalyDetector anomalyDetector,
             ExportEngine exportEngine,
             DiffEngine diffEngine) {
+        this(config, reader, replayEngine, reducerRegistry, pluginManager, defaultSourceId, bisectEngine, anomalyDetector, exportEngine, diffEngine, Map.of());
+    }
+
+    public EventLensServer(
+            EventLensConfig config,
+            EventStoreReader reader,
+            ReplayEngine replayEngine,
+            ReducerRegistry reducerRegistry,
+            PluginManager pluginManager,
+            String defaultSourceId,
+            BisectEngine bisectEngine,
+            AnomalyDetector anomalyDetector,
+            ExportEngine exportEngine,
+            DiffEngine diffEngine,
+            Map<String, String> sourceStreamBindings) {
         this.port = config.getServer().getPort();
         this.reader = reader;
 
@@ -106,13 +121,13 @@ public class EventLensServer {
         var datasourceRoutes   = new DatasourceRoutes(sourceRegistry);
         var pluginRoutes       = new PluginRoutes(sourceRegistry);
         var bisectRoutes       = new BisectRoutes(bisectEngine);
-        var anomalyRoutes      = new AnomalyRoutes(anomalyDetector, auditLogger);
+        var anomalyRoutes      = new AnomalyRoutes(sourceRegistry, config.getAnomaly(), auditLogger);
         var exportRoutes       = new ExportRoutes(exportEngine, auditLogger);
         var asyncExportRoutes  = new AsyncExportRoutes(exportService);
         var healthRoutes       = new HealthRoutes(reader, config.getVersion());
         var metricsRoutes      = new MetricsRoutes();
         var openApiRoutes      = new OpenApiRoutes();
-        var liveTailWs         = new LiveTailWebSocket(reader, auditLogger);
+        var liveTailWs         = new LiveTailWebSocket(sourceRegistry, pluginManager, auditLogger, defaultSourceId, sourceStreamBindings);
 
         var authConfig = config.getServer().getAuth();
 

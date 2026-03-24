@@ -1,7 +1,6 @@
 package io.eventlens.cli;
 
 import io.eventlens.api.EventLensServer;
-import io.eventlens.api.websocket.LiveTailWebSocket;
 import io.eventlens.core.ConfigLoader;
 import io.eventlens.core.ConfigValidator;
 import io.eventlens.core.EventLensConfig;
@@ -13,7 +12,6 @@ import io.eventlens.core.engine.BisectEngine;
 import io.eventlens.core.engine.DiffEngine;
 import io.eventlens.core.engine.ExportEngine;
 import io.eventlens.core.engine.ReplayEngine;
-import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.plugin.PluginDiscovery;
 import io.eventlens.core.plugin.PluginManager;
 import io.eventlens.core.spi.EventStoreReader;
@@ -21,7 +19,6 @@ import io.eventlens.core.spi.ResilientEventStoreReader;
 import io.eventlens.mysql.MySqlEventSourcePlugin;
 import io.eventlens.kafka.KafkaStreamAdapterPlugin;
 import io.eventlens.pg.PostgresEventSourcePlugin;
-import io.eventlens.spi.Event;
 import io.eventlens.spi.EventSourcePlugin;
 import io.eventlens.spi.StreamAdapterPlugin;
 import org.slf4j.Logger;
@@ -99,13 +96,18 @@ public class ServeCommand implements Runnable {
         var exportEngine = new ExportEngine(reader, replayEngine);
         var diffEngine = new DiffEngine(replayEngine);
 
-        var server = new EventLensServer(config, reader, replayEngine, registry, pluginManager, primaryDatasourceId, bisectEngine, anomalyDetector, exportEngine, diffEngine);
-        var auditLogger = new AuditLogger(config.getAudit().isEnabled());
-        var liveTail = new LiveTailWebSocket(reader, auditLogger);
-
-        selectPrimaryStream(config, pluginManager).ifPresentOrElse(
-                stream -> startStreaming(stream, liveTail),
-                liveTail::startPolling);
+        var server = new EventLensServer(
+                config,
+                reader,
+                replayEngine,
+                registry,
+                pluginManager,
+                primaryDatasourceId,
+                bisectEngine,
+                anomalyDetector,
+                exportEngine,
+                diffEngine,
+                datasourceStreamBindings(config));
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
@@ -177,16 +179,6 @@ public class ServeCommand implements Runnable {
                 .orElseThrow(() -> new IllegalStateException("No ready event source plugin found for id: " + datasourceId));
     }
 
-    private java.util.Optional<StreamAdapterPlugin> selectPrimaryStream(EventLensConfig config, PluginManager pluginManager) {
-        for (EventLensConfig.StreamInstanceConfig stream : config.getStreamsOrLegacy()) {
-            var plugin = pluginManager.getStreamAdapter(stream.getId());
-            if (plugin.isPresent()) {
-                return plugin;
-            }
-        }
-        return pluginManager.getFirstReadyStreamAdapter();
-    }
-
     private Map<String, Object> datasourceConfig(EventLensConfig.DatasourceInstanceConfig ds) {
         Map<String, Object> sourceConfig = new HashMap<>();
         sourceConfig.put("jdbcUrl", ds.getUrl());
@@ -197,6 +189,17 @@ public class ServeCommand implements Runnable {
         sourceConfig.put("pool", ds.getPool());
         sourceConfig.put("queryTimeoutSeconds", ds.getQueryTimeoutSeconds());
         return sourceConfig;
+    }
+
+    private Map<String, String> datasourceStreamBindings(EventLensConfig config) {
+        Map<String, String> bindings = new HashMap<>();
+        for (EventLensConfig.DatasourceInstanceConfig datasource : config.getDatasourcesOrLegacy()) {
+            if (datasource == null || !datasource.isEnabled()) continue;
+            if (datasource.getStreamId() != null) {
+                bindings.put(datasource.getId(), datasource.getStreamId());
+            }
+        }
+        return bindings;
     }
 
     private EventSourcePlugin createBuiltinDatasource(String type) {
@@ -212,28 +215,6 @@ public class ServeCommand implements Runnable {
             case "kafka" -> new KafkaStreamAdapterPlugin();
             default -> throw new IllegalArgumentException("Unsupported stream type: " + type);
         };
-    }
-
-    private void startStreaming(StreamAdapterPlugin streamAdapter, LiveTailWebSocket liveTail) {
-        try {
-            streamAdapter.subscribe(event -> liveTail.broadcast(toStoredEvent(event)));
-        } catch (Exception e) {
-            log.warn("Stream adapter subscribe failed ({}); using PostgreSQL polling fallback", e.getMessage());
-            liveTail.startPolling();
-        }
-    }
-
-    private StoredEvent toStoredEvent(Event event) {
-        return new StoredEvent(
-                event.eventId(),
-                event.aggregateId(),
-                event.aggregateType(),
-                event.sequenceNumber(),
-                event.eventType(),
-                io.eventlens.core.JsonUtil.toJson(event.payload()),
-                io.eventlens.core.JsonUtil.toJson(event.metadata()),
-                event.timestamp(),
-                event.globalPosition());
     }
 }
 

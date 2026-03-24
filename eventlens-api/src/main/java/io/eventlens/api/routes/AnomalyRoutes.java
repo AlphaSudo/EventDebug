@@ -1,5 +1,7 @@
 package io.eventlens.api.routes;
 
+import io.eventlens.api.source.SourceRegistry;
+import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.InputValidator;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
@@ -7,30 +9,37 @@ import io.eventlens.core.engine.AnomalyDetector;
 import io.javalin.http.Context;
 
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Anomaly detection endpoints.
  *
- * <p>v2 — emits {@link AuditEvent#ACTION_VIEW_ANOMALIES} audit entries.
+ * <p>v2 - emits {@link AuditEvent#ACTION_VIEW_ANOMALIES} audit entries.
  */
 public class AnomalyRoutes {
 
     private static final int MAX_SCAN_LIMIT = 500;
 
-    private final AnomalyDetector anomalyDetector;
-    private final AuditLogger     auditLogger;
+    private final SourceRegistry sourceRegistry;
+    private final EventLensConfig.AnomalyConfig anomalyConfig;
+    private final AuditLogger auditLogger;
+    private final Map<String, AnomalyDetector> detectors = new ConcurrentHashMap<>();
 
-    public AnomalyRoutes(AnomalyDetector anomalyDetector, AuditLogger auditLogger) {
-        this.anomalyDetector = anomalyDetector;
-        this.auditLogger     = auditLogger;
+    public AnomalyRoutes(
+            SourceRegistry sourceRegistry,
+            EventLensConfig.AnomalyConfig anomalyConfig,
+            AuditLogger auditLogger) {
+        this.sourceRegistry = sourceRegistry;
+        this.anomalyConfig = anomalyConfig;
+        this.auditLogger = auditLogger;
     }
 
     /** GET /api/aggregates/{id}/anomalies */
     public void scanAggregate(Context ctx) {
         String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
-        var result = anomalyDetector.scan(id);
+        var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        var result = detectorFor(source.id(), source).scan(id);
 
-        // 1.8 — audit
         auditLogger.log(AuditEvent.builder()
                 .action(AuditEvent.ACTION_VIEW_ANOMALIES)
                 .resourceType(AuditEvent.RT_ANOMALY)
@@ -40,7 +49,9 @@ public class AnomalyRoutes {
                 .clientIp(clientIp(ctx))
                 .requestId(requestId(ctx))
                 .userAgent(ctx.userAgent())
-                .details(Map.of("anomalyCount", result.size()))
+                .details(Map.of(
+                        "anomalyCount", result.size(),
+                        "source", source.id()))
                 .build());
 
         ctx.json(result);
@@ -51,10 +62,9 @@ public class AnomalyRoutes {
         int limit = Math.min(
                 InputValidator.validateLimit(ctx.queryParam("limit"), 100, MAX_SCAN_LIMIT),
                 MAX_SCAN_LIMIT);
+        var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        var result = detectorFor(source.id(), source).scanRecent(limit);
 
-        var result = anomalyDetector.scanRecent(limit);
-
-        // 1.8 — audit
         auditLogger.log(AuditEvent.builder()
                 .action(AuditEvent.ACTION_VIEW_ANOMALIES)
                 .resourceType(AuditEvent.RT_ANOMALY)
@@ -63,13 +73,20 @@ public class AnomalyRoutes {
                 .clientIp(clientIp(ctx))
                 .requestId(requestId(ctx))
                 .userAgent(ctx.userAgent())
-                .details(Map.of("limit", limit, "anomalyCount", result.size()))
+                .details(Map.of(
+                        "limit", limit,
+                        "anomalyCount", result.size(),
+                        "source", source.id()))
                 .build());
 
         ctx.json(result);
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    private AnomalyDetector detectorFor(String sourceId, SourceRegistry.ResolvedSource source) {
+        return detectors.computeIfAbsent(
+                sourceId,
+                ignored -> new AnomalyDetector(source.reader(), source.replayEngine(), anomalyConfig));
+    }
 
     private static String userId(Context ctx) {
         String v = ctx.attribute("auditUserId");

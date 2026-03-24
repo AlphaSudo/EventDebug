@@ -163,12 +163,15 @@ public class EventLensConfig {
     public static class DatasourceInstanceConfig extends DatasourceConfig {
         private String id = "default";
         private String type = "postgres";
+        private String streamId;
         private boolean enabled = true;
 
         public String getId() { return id; }
         public void setId(String id) { this.id = id; }
         public String getType() { return type; }
         public void setType(String type) { this.type = type; }
+        public String getStreamId() { return streamId; }
+        public void setStreamId(String streamId) { this.streamId = streamId; }
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
 

@@ -2,6 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import { getAnomalies, AnomalyReport } from '../api/client';
 import { parseEventTimestamp } from '../utils/time';
 
+interface Props {
+    source?: string | null;
+}
+
 function severityBadgeClass(sev: string): string {
     switch (sev) {
         case 'CRITICAL':
@@ -80,10 +84,10 @@ function GaugeWave({ color }: { color: 'green' | 'cyan' }) {
     );
 }
 
-export default function AnomalyPanel() {
+export default function AnomalyPanel({ source }: Props) {
     const { data: anomalies, isLoading } = useQuery({
-        queryKey: ['anomalies'],
-        queryFn: () => getAnomalies(),
+        queryKey: ['anomalies', source ?? 'default'],
+        queryFn: () => getAnomalies(100, source),
         refetchInterval: 30_000,
     });
 

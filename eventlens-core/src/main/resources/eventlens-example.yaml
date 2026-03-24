@@ -33,6 +33,7 @@ query-cache:
 datasources:
   - id: default
     type: postgres
+    stream-id: default-kafka
     url: jdbc:postgresql://localhost:5432/eventlens_dev
     username: postgres
     password: ""
@@ -58,6 +59,7 @@ datasources:
 
   - id: reporting-mysql
     type: mysql
+    stream-id: ""
     url: jdbc:mysql://localhost:3306/eventlens_reporting
     username: root
     password: ""

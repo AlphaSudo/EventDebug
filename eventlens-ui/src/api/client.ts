@@ -45,6 +45,7 @@ export type {
     DatasourceHealth,
     DatasourceSummary,
     FieldChange,
+    LiveStreamUnavailableMessage,
     PluginSummary,
     ReplayResult,
     StateTransition,
@@ -126,12 +127,12 @@ export const bisect = async (id: string, expression: string) => {
         .then(r => r.data);
 };
 
-export const getAnomalies = async (limit = 100) => {
+export const getAnomalies = async (limit = 100, source?: string | null) => {
     if (isDemoMode()) {
         await delay(45);
         return demoAnomalies(limit);
     }
-    return api.get<AnomalyReport[]>(`/anomalies/recent?limit=${limit}`).then(r => r.data);
+    return api.get<AnomalyReport[]>(withOptionalSource(`/anomalies/recent?limit=${limit}`, source)).then(r => r.data);
 };
 
 export const getRecentEvents = async (limit = 50, source?: string | null) => {
