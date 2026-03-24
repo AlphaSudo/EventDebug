@@ -6,8 +6,10 @@ include(
     "eventlens-source-postgres",
     "eventlens-source-mysql",
     "eventlens-stream-kafka",
+    "eventlens-plugin-test",
     "eventlens-api",
     "eventlens-cli",
     "eventlens-ui",
     "eventlens-app"
 )
+

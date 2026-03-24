@@ -20,12 +20,17 @@ This compiles all modules, runs the React Vite build, and produces the fat JAR a
 ## Running Tests
 
 ```bash
-# Unit tests only
+# Unit tests + contract tests
 ./gradlew test
 
-# Integration tests (requires Docker/Podman for Testcontainers)
+# Full verification gate
+./gradlew check
+
+# Integration and contract tests (requires Docker/Podman for Testcontainers)
 ./gradlew test --info
 ```
+
+Built-in plugins should keep passing the shared contract harness in `eventlens-plugin-test`.
 
 ## Running Locally
 
@@ -58,3 +63,9 @@ Please open a GitHub Issue with:
 - Java version (`java -version`)
 - Steps to reproduce
 - Expected vs. actual behaviour
+
+## Plugin Development
+
+- Start with [docs/plugin-authoring.md](C:/Java%20Developer/EventDebug/docs/plugin-authoring.md).
+- Reuse the shared contract harness from ventlens-plugin-test for new source or stream plugins.
+- Register plugin entry points with META-INF/services/... so discovery works from classpath and /plugins.

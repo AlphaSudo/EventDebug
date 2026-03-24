@@ -662,3 +662,9 @@ In containerized environments, direct logs to stdout/stderr and collect them via
 | [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Build, test, and PR guidelines |
 | [eventlens.yaml.example](eventlens.yaml.example) | Annotated config template |
+
+## v3 Plugin Docs
+
+- [Plugin authoring guide](C:/Java%20Developer/EventDebug/docs/plugin-authoring.md)
+- [v3 GA checklist](C:/Java%20Developer/EventDebug/docs/v3-ga-checklist.md)
+- [SPI README](C:/Java%20Developer/EventDebug/eventlens-spi/README.md)
