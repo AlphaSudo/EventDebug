@@ -26,11 +26,15 @@ public record DatasourceListingModel(
             case STOPPED -> "stopped";
         };
 
+        String healthMessage = instance.health() != null
+                ? java.util.Objects.toString(instance.health().message(), "")
+                : "Health not yet checked";
+
         return new DatasourceListingModel(
                 instance.instanceId(),
                 instance.displayName(),
                 status,
-                instance.health().message(),
+                healthMessage,
                 List.of() // Capabilities will be populated in later phases
         );
     }

@@ -4,14 +4,17 @@ import io.eventlens.core.aggregator.ReducerRegistry;
 import io.eventlens.core.engine.ReplayEngine;
 import io.eventlens.core.plugin.DatasourceListingModel;
 import io.eventlens.core.plugin.PluginInstance;
+import io.eventlens.spi.HealthStatus;
 import io.eventlens.core.plugin.PluginListingModel;
 import io.eventlens.core.plugin.PluginManager;
 import io.eventlens.core.spi.EventStoreReader;
 import io.eventlens.spi.PluginLifecycle;
 
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -76,17 +79,22 @@ public final class SourceRegistry {
             throw new IllegalArgumentException("Plugin is not a datasource: " + datasourceId);
         }
 
-        return Map.of(
-                "id", instance.instanceId(),
-                "displayName", instance.displayName(),
-                "status", instance.lifecycle().name().toLowerCase(),
-                "health", Map.of(
-                        "state", instance.health().state().name().toLowerCase(),
-                        "message", instance.health().message()
-                ),
-                "lastHealthCheck", instance.lastHealthCheck(),
-                "failureReason", Optional.ofNullable(instance.failureReason()).orElse("")
-        );
+        HealthStatus health = instance.health();
+        Map<String, Object> healthMap = new LinkedHashMap<>();
+        healthMap.put("state", health != null && health.state() != null
+                ? health.state().name().toLowerCase() : "unknown");
+        healthMap.put("message", health != null
+                ? Objects.toString(health.message(), "") : "Health not yet checked");
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", Objects.toString(instance.instanceId(), datasourceId));
+        result.put("displayName", Objects.toString(instance.displayName(), datasourceId));
+        result.put("status", instance.lifecycle() != null
+                ? instance.lifecycle().name().toLowerCase() : "unknown");
+        result.put("health", healthMap);
+        result.put("lastHealthCheck", Objects.toString(instance.lastHealthCheck(), ""));
+        result.put("failureReason", Objects.toString(instance.failureReason(), ""));
+        return result;
     }
 
     public List<PluginListingModel> listPlugins() {
