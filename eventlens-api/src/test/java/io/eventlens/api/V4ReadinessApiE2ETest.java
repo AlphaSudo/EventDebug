@@ -245,7 +245,7 @@ class V4ReadinessApiE2ETest {
             ps.setString(5, eventType);
             ps.setString(6, payload.strip());
             ps.setString(7, "{\"source\":\"postgres\"}");
-            ps.setObject(8, timestamp);
+            ps.setObject(8, java.sql.Timestamp.from(timestamp));
             ps.executeUpdate();
         }
     }
@@ -264,7 +264,7 @@ class V4ReadinessApiE2ETest {
             ps.setString(5, eventType);
             ps.setString(6, payload.strip());
             ps.setString(7, "{\"source\":\"mysql\"}");
-            ps.setObject(8, timestamp);
+            ps.setObject(8, java.sql.Timestamp.from(timestamp));
             ps.executeUpdate();
         }
     }
