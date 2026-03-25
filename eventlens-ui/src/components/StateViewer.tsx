@@ -8,6 +8,7 @@ interface Props {
     sequence: number;
     activeTab?: TabId;
     onTabChange?: (tab: TabId) => void;
+    source?: string | null;
 }
 
 export type TabId = 'changes' | 'before-after' | 'raw';
@@ -18,8 +19,8 @@ const TABS: { id: TabId; label: string; emoji: string }[] = [
     { id: 'raw', label: 'Raw JSON', emoji: '{ }' },
 ];
 
-export default function StateViewer({ aggregateId, sequence, activeTab: externalTab, onTabChange }: Props) {
-    const { data: transitions, isLoading } = useReplay(aggregateId);
+export default function StateViewer({ aggregateId, sequence, activeTab: externalTab, onTabChange, source }: Props) {
+    const { data: transitions, isLoading } = useReplay(aggregateId, source);
     const [localTab, setLocalTab] = useState<TabId>('changes');
 
     const activeTab = externalTab ?? localTab;
@@ -132,3 +133,5 @@ export default function StateViewer({ aggregateId, sequence, activeTab: external
         </div>
     );
 }
+
+

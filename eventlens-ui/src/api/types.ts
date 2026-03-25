@@ -4,7 +4,7 @@ export interface StoredEvent {
     aggregateType: string;
     sequenceNumber: number;
     eventType: string;
-    payload: string;
+    payload: string | null;
     metadata: string;
     timestamp: string;
     globalPosition: number;
@@ -46,4 +46,43 @@ export interface AnomalyReport {
     triggeringEventType: string;
     timestamp: string;
     stateAtAnomaly: Record<string, unknown>;
+}
+
+export interface DatasourceSummary {
+    id: string;
+    displayName: string;
+    status: string;
+    healthMessage: string;
+    capabilities: string[];
+}
+
+export interface DatasourceHealth {
+    id: string;
+    displayName: string;
+    status: string;
+    health: {
+        state: string;
+        message: string;
+    };
+    lastHealthCheck: string;
+    failureReason: string;
+}
+
+export interface PluginSummary {
+    instanceId: string;
+    typeId: string;
+    displayName: string;
+    pluginType: string;
+    lifecycle: string;
+    health: {
+        state: string;
+        message: string;
+    };
+    lastHealthCheck: string;
+    failureReason: string | null;
+}
+
+export interface LiveStreamUnavailableMessage {
+    type: 'NO_LIVE_STREAM';
+    source: string;
 }

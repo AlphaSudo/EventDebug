@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { StateTransition } from '../api/client';
+import type { StoredEvent } from '../api/client';
 import { useTimeline } from '../hooks/useTimeline';
 import { parseEventTimestamp } from '../utils/time';
 
@@ -7,9 +7,14 @@ interface Props {
     aggregateId: string;
     selectedSequence: number | null;
     onSelectEvent: (seq: number) => void;
+    source?: string | null;
 }
 
 const MIN_SAME_TYPE_RUN = 4;
+
+type Segment =
+    | { kind: 'single'; event: StoredEvent; index: number }
+    | { kind: 'group'; eventType: string; items: StoredEvent[]; startIndex: number };
 
 function dotClass(eventType: string): string {
     const t = eventType.toLowerCase();
@@ -23,17 +28,13 @@ function dotClass(eventType: string): string {
     return 'default';
 }
 
-type Segment =
-    | { kind: 'single'; transition: StateTransition; index: number }
-    | { kind: 'group'; eventType: string; items: StateTransition[]; startIndex: number };
-
-function buildSegments(transitions: StateTransition[]): Segment[] {
+function buildSegments(events: StoredEvent[]): Segment[] {
     const out: Segment[] = [];
     let i = 0;
-    while (i < transitions.length) {
-        const type = transitions[i].event.eventType;
+    while (i < events.length) {
+        const type = events[i].eventType;
         let j = i + 1;
-        while (j < transitions.length && transitions[j].event.eventType === type) {
+        while (j < events.length && events[j].eventType === type) {
             j++;
         }
         const runLen = j - i;
@@ -41,13 +42,13 @@ function buildSegments(transitions: StateTransition[]): Segment[] {
             out.push({
                 kind: 'group',
                 eventType: type,
-                items: transitions.slice(i, j),
+                items: events.slice(i, j),
                 startIndex: i,
             });
             i = j;
         } else {
             for (let k = i; k < j; k++) {
-                out.push({ kind: 'single', transition: transitions[k], index: k });
+                out.push({ kind: 'single', event: events[k], index: k });
             }
             i = j;
         }
@@ -59,80 +60,64 @@ function groupKey(startIndex: number, len: number): string {
     return `${startIndex}-${len}`;
 }
 
-interface StepButtonProps {
-    transition: StateTransition;
+function StepButton({
+    event,
+    stepNumber,
+    selectedSequence,
+    onSelectEvent,
+    compact,
+}: {
+    event: StoredEvent;
     stepNumber: number;
     selectedSequence: number | null;
     onSelectEvent: (seq: number) => void;
     compact?: boolean;
-    hasDiff?: boolean;
-}
-
-function StepButton({ transition, stepNumber, selectedSequence, onSelectEvent, compact, hasDiff }: StepButtonProps) {
-    const e = transition.event;
-    const dc = dotClass(e.eventType);
-    const active = selectedSequence === e.sequenceNumber;
+}) {
+    const dc = dotClass(event.eventType);
+    const active = selectedSequence === event.sequenceNumber;
     return (
         <button
             type="button"
-            data-timeline-seq={e.sequenceNumber}
+            data-timeline-seq={event.sequenceNumber}
             className={`timeline-step timeline-step-${dc} ${compact ? 'timeline-step-compact' : ''} ${active ? 'active' : ''}`}
-            onClick={() => onSelectEvent(e.sequenceNumber)}
-            title={`${e.eventType}\n${parseEventTimestamp(e.timestamp).toLocaleString()}`}
+            onClick={() => onSelectEvent(event.sequenceNumber)}
+            title={`${event.eventType}\n${parseEventTimestamp(event.timestamp).toLocaleString()}`}
             aria-current={active ? 'step' : undefined}
-            aria-label={`Event ${stepNumber}, sequence ${e.sequenceNumber}, ${e.eventType}`}
+            aria-label={`Event ${stepNumber}, sequence ${event.sequenceNumber}, ${event.eventType}`}
         >
             <span className="timeline-step-badge">Event {stepNumber}</span>
-            <span className="timeline-step-seq">seq #{e.sequenceNumber}</span>
-            <span className="timeline-step-type">{e.eventType}</span>
-            {hasDiff && <span className="timeline-anomaly-marker" title="Has state changes">●</span>}
+            <span className="timeline-step-seq">seq #{event.sequenceNumber}</span>
+            <span className="timeline-step-type">{event.eventType}</span>
         </button>
     );
 }
 
-export default function Timeline({ aggregateId, selectedSequence, onSelectEvent }: Props) {
-    const { data: transitions, isLoading } = useTimeline(aggregateId);
+export default function Timeline({ aggregateId, selectedSequence, onSelectEvent, source }: Props) {
+    const { data: timeline, isLoading } = useTimeline(aggregateId, source);
+    const events = timeline?.events ?? [];
+    const totalEvents = timeline?.totalEvents ?? 0;
     const [expandedGroupKey, setExpandedGroupKey] = useState<string | null>(null);
     const [jumpInput, setJumpInput] = useState('');
-    const [filterType, setFilterType] = useState<string>('');
+    const [filterType, setFilterType] = useState('');
 
-    const segments = useMemo(() => (transitions?.length ? buildSegments(transitions) : []), [transitions]);
-
-    // Derive unique event types for filter chips
-    const eventTypes = useMemo(() => {
-        if (!transitions?.length) return [];
-        const types = [...new Set(transitions.map(t => t.event.eventType))];
-        return types.sort();
-    }, [transitions]);
-
-    // Apply filter: when a type is active, only show matching steps
-    const filteredTransitions = useMemo(() => {
-        if (!filterType || !transitions?.length) return transitions;
-        return transitions.filter(t => t.event.eventType === filterType);
-    }, [transitions, filterType]);
-
-    const filteredSegments = useMemo(
-        () => (filteredTransitions?.length ? buildSegments(filteredTransitions) : []),
-        [filteredTransitions]
-    );
-
+    const segments = useMemo(() => (events.length ? buildSegments(events) : []), [events]);
+    const eventTypes = useMemo(() => (events.length ? [...new Set(events.map(event => event.eventType))].sort() : []), [events]);
+    const filteredEvents = useMemo(() => (!filterType ? events : events.filter(event => event.eventType === filterType)), [events, filterType]);
+    const filteredSegments = useMemo(() => (filteredEvents.length ? buildSegments(filteredEvents) : []), [filteredEvents]);
     const activeSegments = filterType ? filteredSegments : segments;
-    const activeTransitions = filterType ? filteredTransitions : transitions;
+    const activeEvents = filterType ? filteredEvents : events;
 
-    const selectedIndex =
-        selectedSequence != null && activeTransitions?.length
-            ? activeTransitions.findIndex(t => t.event.sequenceNumber === selectedSequence)
-            : -1;
+    const selectedIndex = selectedSequence != null ? activeEvents.findIndex(event => event.sequenceNumber === selectedSequence) : -1;
     const stepDisplay = selectedIndex >= 0 ? selectedIndex + 1 : null;
-
-    const minSeq = activeTransitions?.[0]?.event.sequenceNumber ?? 0;
-    const maxSeq = activeTransitions?.[activeTransitions.length - 1]?.event.sequenceNumber ?? 0;
+    const minSeq = activeEvents[0]?.sequenceNumber ?? 0;
+    const maxSeq = activeEvents[activeEvents.length - 1]?.sequenceNumber ?? 0;
 
     const expandedSeg = useMemo(() => {
         if (!expandedGroupKey) return null;
         for (const seg of activeSegments) {
-            if (seg.kind !== 'group') continue;
-            if (groupKey(seg.startIndex, seg.items.length) === expandedGroupKey) return seg;
+            if (seg.kind === 'group' && groupKey(seg.startIndex, seg.items.length) === expandedGroupKey) {
+                return seg;
+            }
         }
         return null;
     }, [expandedGroupKey, activeSegments]);
@@ -165,9 +150,8 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
         setExpandedGroupKey(prev => (prev === key ? null : key));
     };
 
-    // ── Keyboard navigation ──────────────────────────────────────────────
     const handleKeyNav = useCallback((e: KeyboardEvent) => {
-        if (!activeTransitions?.length) return;
+        if (!activeEvents.length) return;
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT') return;
 
@@ -176,32 +160,25 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
             const dir = e.key === 'ArrowLeft' ? -1 : 1;
 
             if (e.shiftKey) {
-                // Jump to prev/next group boundary
                 const currentSeg = selectedIndex >= 0
-                    ? activeSegments.find(seg =>
-                        seg.kind === 'group'
-                            ? selectedIndex >= seg.startIndex && selectedIndex < seg.startIndex + seg.items.length
-                            : seg.index === selectedIndex
-                    )
+                    ? activeSegments.find(seg => seg.kind === 'group'
+                        ? selectedIndex >= seg.startIndex && selectedIndex < seg.startIndex + seg.items.length
+                        : seg.index === selectedIndex)
                     : null;
                 const segIdx = currentSeg ? activeSegments.indexOf(currentSeg) : -1;
                 const targetSeg = activeSegments[segIdx + dir];
                 if (targetSeg) {
-                    const firstT = targetSeg.kind === 'single'
-                        ? targetSeg.transition
-                        : targetSeg.items[0];
-                    onSelectEvent(firstT.event.sequenceNumber);
+                    const firstEvent = targetSeg.kind === 'single' ? targetSeg.event : targetSeg.items[0];
+                    onSelectEvent(firstEvent.sequenceNumber);
                 }
             } else {
-                // Step one event at a time
                 const nextIndex = selectedIndex + dir;
-                if (nextIndex >= 0 && nextIndex < activeTransitions.length) {
-                    onSelectEvent(activeTransitions[nextIndex].event.sequenceNumber);
+                if (nextIndex >= 0 && nextIndex < activeEvents.length) {
+                    onSelectEvent(activeEvents[nextIndex].sequenceNumber);
                 }
             }
         }
 
-        // Number keys 1-4 switch StateViewer tabs — dispatched as custom event
         if (['1', '2', '3', '4'].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
             if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
                 const tabMap: Record<string, string> = { '1': 'changes', '2': 'before-after', '3': 'raw' };
@@ -209,18 +186,16 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
             }
         }
 
-        // Space = pause/resume live stream
         if (e.key === ' ' && target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA' && target.tagName !== 'BUTTON') {
             e.preventDefault();
             window.dispatchEvent(new CustomEvent('eventlens:togglestream'));
         }
 
-        // Cmd/Ctrl+K focuses search
         if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             document.getElementById('aggregate-search')?.focus();
         }
-    }, [activeTransitions, activeSegments, selectedIndex, onSelectEvent]);
+    }, [activeEvents, activeSegments, selectedIndex, onSelectEvent]);
 
     const handleKeyNavRef = useRef(handleKeyNav);
     handleKeyNavRef.current = handleKeyNav;
@@ -233,7 +208,7 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
 
     const handleJump = () => {
         const seq = parseInt(jumpInput, 10);
-        if (!isNaN(seq) && activeTransitions?.some(t => t.event.sequenceNumber === seq)) {
+        if (!Number.isNaN(seq) && activeEvents.some(event => event.sequenceNumber === seq)) {
             onSelectEvent(seq);
             setJumpInput('');
         }
@@ -242,16 +217,16 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
     if (isLoading) {
         return (
             <div className="card">
-                <div className="card-title">⏱ Event sequence</div>
+                <div className="card-title">Event sequence</div>
                 <div className="skeleton" style={{ height: 64 }} />
             </div>
         );
     }
 
-    if (!transitions?.length) {
+    if (!events.length) {
         return (
             <div className="card">
-                <div className="card-title">⏱ Event sequence</div>
+                <div className="card-title">Event sequence</div>
                 <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No events found for this aggregate.</p>
             </div>
         );
@@ -259,16 +234,14 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
 
     return (
         <div className="card">
-            {/* Header row */}
             <div className="timeline-header-row">
                 <div className="card-title" style={{ marginBottom: 0 }}>
-                    ⏱ Event sequence
+                    Event sequence
                     <span className="timeline-count-pill">
-                        {filterType ? `${activeTransitions?.length} / ${transitions.length}` : transitions.length} events
+                        {filterType ? `${activeEvents.length} / ${totalEvents}` : totalEvents} events
                     </span>
                 </div>
 
-                {/* Jump to seq */}
                 <div className="timeline-jump-group">
                     <input
                         className="timeline-jump-input"
@@ -279,11 +252,10 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
                         onKeyDown={e => e.key === 'Enter' && handleJump()}
                         aria-label="Jump to sequence number"
                     />
-                    <button type="button" className="timeline-jump-btn" onClick={handleJump}>↵</button>
+                    <button type="button" className="timeline-jump-btn" onClick={handleJump}>Go</button>
                 </div>
             </div>
 
-            {/* Event type filter chips */}
             {eventTypes.length > 1 && (
                 <div className="timeline-filter-chips" role="group" aria-label="Filter by event type">
                     <button
@@ -298,7 +270,7 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
                             key={type}
                             type="button"
                             className={`filter-chip ${filterType === type ? 'active' : ''}`}
-                            onClick={() => setFilterType(t => t === type ? '' : type)}
+                            onClick={() => setFilterType(current => current === type ? '' : type)}
                         >
                             {type}
                         </button>
@@ -310,15 +282,14 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
                 <div className="timeline-stepper" role="navigation" aria-label="Events in order">
                     <div className="timeline-stepper-track">
                         {activeSegments.map((seg, si) => (
-                            <Fragment key={seg.kind === 'group' ? `g-${seg.startIndex}` : `s-${seg.transition.event.sequenceNumber}`}>
-                                {si > 0 && <span className="timeline-step-arrow" aria-hidden>→</span>}
+                            <Fragment key={seg.kind === 'group' ? `g-${seg.startIndex}` : `s-${seg.event.sequenceNumber}`}>
+                                {si > 0 && <span className="timeline-step-arrow" aria-hidden>{'>'}</span>}
                                 {seg.kind === 'single' ? (
                                     <StepButton
-                                        transition={seg.transition}
+                                        event={seg.event}
                                         stepNumber={seg.index + 1}
                                         selectedSequence={selectedSequence}
                                         onSelectEvent={onSelectEvent}
-                                        hasDiff={Object.keys(seg.transition.diff ?? {}).length > 0}
                                     />
                                 ) : (
                                     <GroupSummaryChip
@@ -338,7 +309,7 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
                         <div className="timeline-expanded-head">
                             <span className="timeline-expanded-title">{expandedSeg.eventType}</span>
                             <span className="timeline-expanded-meta">
-                                {expandedSeg.items.length} events · steps {expandedSeg.startIndex + 1}–
+                                {expandedSeg.items.length} events steps {expandedSeg.startIndex + 1}-
                                 {expandedSeg.startIndex + expandedSeg.items.length}
                             </span>
                             <button type="button" className="timeline-expanded-close" onClick={() => setExpandedGroupKey(null)}>
@@ -346,16 +317,15 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
                             </button>
                         </div>
                         <div className="timeline-expanded-strip">
-                            {expandedSeg.items.map((t, i) => (
-                                <Fragment key={t.event.sequenceNumber}>
-                                    {i > 0 && <span className="timeline-step-arrow timeline-step-arrow-compact" aria-hidden>→</span>}
+                            {expandedSeg.items.map((event, i) => (
+                                <Fragment key={event.sequenceNumber}>
+                                    {i > 0 && <span className="timeline-step-arrow timeline-step-arrow-compact" aria-hidden>{'>'}</span>}
                                     <StepButton
-                                        transition={t}
+                                        event={event}
                                         stepNumber={expandedSeg.startIndex + i + 1}
                                         selectedSequence={selectedSequence}
                                         onSelectEvent={onSelectEvent}
                                         compact
-                                        hasDiff={Object.keys(t.diff ?? {}).length > 0}
                                     />
                                 </Fragment>
                             ))}
@@ -375,22 +345,22 @@ export default function Timeline({ aggregateId, selectedSequence, onSelectEvent 
             />
 
             <div className="timeline-info">
-                <span className="timeline-info-edge">First · seq #{minSeq}</span>
+                <span className="timeline-info-edge">First seq #{minSeq}</span>
                 <span className="timeline-info-center">
                     {stepDisplay != null ? (
                         <>
-                            <strong>Step {stepDisplay}</strong> of {activeTransitions?.length}
-                            <span className="timeline-info-muted"> · sequence #{selectedSequence}</span>
+                            <strong>Step {stepDisplay}</strong> of {activeEvents.length}
+                            <span className="timeline-info-muted"> sequence #{selectedSequence}</span>
                             <br />
                             <span className="timeline-info-type">
-                                {activeTransitions?.find(t => t.event.sequenceNumber === selectedSequence)?.event.eventType ?? ''}
+                                {activeEvents.find(event => event.sequenceNumber === selectedSequence)?.eventType ?? ''}
                             </span>
                         </>
                     ) : (
                         'Select an event above or drag the scrubber'
                     )}
                 </span>
-                <span className="timeline-info-edge">Last · seq #{maxSeq}</span>
+                <span className="timeline-info-edge">Last seq #{maxSeq}</span>
             </div>
         </div>
     );
@@ -408,11 +378,10 @@ function GroupSummaryChip({
     onToggle: () => void;
 }) {
     const { items, startIndex, eventType } = segment;
-    const first = items[0].event;
-    const last = items[items.length - 1].event;
+    const first = items[0];
+    const last = items[items.length - 1];
     const dc = dotClass(eventType);
-    const containsSelection =
-        selectedSequence != null && items.some(t => t.event.sequenceNumber === selectedSequence);
+    const containsSelection = selectedSequence != null && items.some(event => event.sequenceNumber === selectedSequence);
     const showAnchor = containsSelection && !expanded;
 
     return (
@@ -422,17 +391,17 @@ function GroupSummaryChip({
             onClick={onToggle}
             aria-expanded={expanded}
             data-timeline-group-anchor={showAnchor ? '1' : undefined}
-            title={`${items.length} × ${eventType}. Click to ${expanded ? 'collapse' : 'show every step'}.`}
+            title={`${items.length} x ${eventType}. Click to ${expanded ? 'collapse' : 'show every step'}.`}
         >
             <span className="timeline-group-chip-top">
-                <span className="timeline-group-count">×{items.length}</span>
+                <span className="timeline-group-count">x{items.length}</span>
                 <span className="timeline-group-chevron" aria-hidden>
-                    {expanded ? '▲' : '▼'}
+                    {expanded ? 'v' : '>'}
                 </span>
             </span>
             <span className="timeline-group-type">{eventType}</span>
             <span className="timeline-group-range">
-                steps {startIndex + 1}–{startIndex + items.length} · seq #{first.sequenceNumber}–#{last.sequenceNumber}
+                steps {startIndex + 1}-{startIndex + items.length} seq #{first.sequenceNumber}-#{last.sequenceNumber}
             </span>
         </button>
     );

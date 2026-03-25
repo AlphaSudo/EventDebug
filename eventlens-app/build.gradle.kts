@@ -6,8 +6,9 @@ plugins {
 
 dependencies {
     implementation(project(":eventlens-core"))
-    implementation(project(":eventlens-pg"))
-    implementation(project(":eventlens-kafka"))
+    implementation(project(":eventlens-source-postgres"))
+    implementation(project(":eventlens-source-mysql"))
+    implementation(project(":eventlens-stream-kafka"))
     implementation(project(":eventlens-api"))
     implementation(project(":eventlens-cli"))
     implementation("ch.qos.logback:logback-classic:1.5.32")
@@ -24,7 +25,6 @@ tasks.shadowJar {
     archiveVersion.set("")
     mergeServiceFiles()
 
-    // Ensure the fat JAR runs with preview features
     manifest {
         attributes(
             "Main-Class" to "io.eventlens.EventLensMain",
@@ -33,7 +33,6 @@ tasks.shadowJar {
     }
 }
 
-// Make 'build' also produce the shadow jar
 tasks.named("build") {
     dependsOn(tasks.shadowJar)
 }

@@ -30,7 +30,6 @@ public final class ConfigValidator {
             return issues;
         }
 
-        // --- Server ---
         var server = config.getServer();
         if (server == null) {
             issues.add(error("server", "Required"));
@@ -44,7 +43,6 @@ public final class ConfigValidator {
                 issues.add(warning("server.allowed-origins", "Empty allowlist will block browser access"));
             }
 
-            // --- Auth ---
             var auth = server.getAuth();
             if (auth == null) {
                 issues.add(error("server.auth", "Required"));
@@ -75,16 +73,13 @@ public final class ConfigValidator {
             }
         }
 
-        // --- Rate limiting ---
         if (server != null && server.getSecurity() != null && server.getSecurity().getRateLimit() != null) {
             var rl = server.getSecurity().getRateLimit();
             if (rl.getRequestsPerMinute() < 1 || rl.getRequestsPerMinute() > 10_000) {
-                issues.add(error("server.security.rate-limit.requests-per-minute",
-                        "Must be between 1 and 10000"));
+                issues.add(error("server.security.rate-limit.requests-per-minute", "Must be between 1 and 10000"));
             }
             if (rl.getBurst() < 1 || rl.getBurst() > 10_000) {
-                issues.add(error("server.security.rate-limit.burst",
-                        "Must be between 1 and 10000"));
+                issues.add(error("server.security.rate-limit.burst", "Must be between 1 and 10000"));
             }
             if (rl.getBurst() > rl.getRequestsPerMinute() * 10L) {
                 issues.add(warning("server.security.rate-limit.burst",
@@ -92,20 +87,80 @@ public final class ConfigValidator {
             }
         }
 
-        // --- Datasource ---
+        validateLegacyDatasource(config, issues);
+        validateDatasourceInstances(config.getDatasourcesOrLegacy(), issues);
+        validateStreamInstances(config.getStreamsOrLegacy(), issues);
+
+        var anomaly = config.getAnomaly();
+        if (anomaly != null && anomaly.getRules() != null) {
+            for (int i = 0; i < anomaly.getRules().size(); i++) {
+                var rule = anomaly.getRules().get(i);
+                String base = "anomaly.rules[%d]".formatted(i);
+                if (rule == null) {
+                    issues.add(error(base, "Rule is null"));
+                    continue;
+                }
+                if (isBlank(rule.getCode())) {
+                    issues.add(error(base + ".code", "Required"));
+                }
+                if (isBlank(rule.getCondition())) {
+                    issues.add(error(base + ".condition", "Required for rule '%s'".formatted(rule.getCode())));
+                } else {
+                    try {
+                        BisectEngine.parseCondition(rule.getCondition());
+                    } catch (Exception e) {
+                        issues.add(error(base + ".condition",
+                                "Unparseable condition for rule '%s': %s".formatted(rule.getCode(), e.getMessage())));
+                    }
+                }
+            }
+        }
+
+        return issues;
+    }
+
+    private static void validateLegacyDatasource(EventLensConfig config, List<ValidationError> issues) {
         var ds = config.getDatasource();
         if (ds == null) {
             issues.add(error("datasource", "Required"));
-        } else {
+            return;
+        }
+        if (isBlank(ds.getUrl())) {
+            issues.add(error("datasource.url", "Required"));
+        } else if (!ds.getUrl().startsWith("jdbc:postgresql://")) {
+            String prefix = ds.getUrl().substring(0, Math.min(30, ds.getUrl().length()));
+            issues.add(error("datasource.url", "Must be a PostgreSQL JDBC URL (got: %s...)".formatted(prefix)));
+        }
+        if (isBlank(ds.getUsername())) {
+            issues.add(error("datasource.username", "Required"));
+        }
+    }
+
+    private static void validateDatasourceInstances(List<EventLensConfig.DatasourceInstanceConfig> datasources, List<ValidationError> issues) {
+        if (datasources == null || datasources.isEmpty()) {
+            issues.add(error("datasources", "At least one datasource is required"));
+            return;
+        }
+        for (int i = 0; i < datasources.size(); i++) {
+            var ds = datasources.get(i);
+            String base = "datasources[%d]".formatted(i);
+            if (ds == null) {
+                issues.add(error(base, "Datasource is null"));
+                continue;
+            }
+            if (isBlank(ds.getId())) {
+                issues.add(error(base + ".id", "Required"));
+            }
+            if (isBlank(ds.getType())) {
+                issues.add(error(base + ".type", "Required"));
+            }
             if (isBlank(ds.getUrl())) {
-                issues.add(error("datasource.url", "Required"));
-            } else if (!ds.getUrl().startsWith("jdbc:postgresql://")) {
-                String prefix = ds.getUrl().substring(0, Math.min(30, ds.getUrl().length()));
-                issues.add(error("datasource.url",
-                        "Must be a PostgreSQL JDBC URL (got: %s...)".formatted(prefix)));
+                issues.add(error(base + ".url", "Required"));
+            } else if (!isSupportedDatasourceUrl(ds.getType(), ds.getUrl())) {
+                issues.add(error(base + ".url", "URL must match datasource type '%s'".formatted(ds.getType())));
             }
             if (isBlank(ds.getUsername())) {
-                issues.add(error("datasource.username", "Required"));
+                issues.add(error(base + ".username", "Required"));
             }
             if (ds.getColumns() != null && ds.getColumns().hasAnyOverride()) {
                 try {
@@ -121,73 +176,71 @@ public final class ConfigValidator {
                             Map.entry("global-position", ds.getColumns().getGlobalPosition())
                     ));
                 } catch (ConfigurationException e) {
-                    issues.add(error("datasource.columns", e.getMessage()));
+                    issues.add(error(base + ".columns", e.getMessage()));
                 }
             }
-
-            // --- HikariCP pool sizing (elastic pooling) ---
-            var pool = ds.getPool();
-            if (pool != null) {
-                if (pool.getMaximumPoolSize() < 1 || pool.getMaximumPoolSize() > 200) {
-                    issues.add(error("datasource.pool.maximum-pool-size", "Must be between 1 and 200"));
-                }
-                if (pool.getMinimumIdle() < 0 || pool.getMinimumIdle() > 200) {
-                    issues.add(error("datasource.pool.minimum-idle", "Must be between 0 and 200"));
-                }
-                if (pool.getMinimumIdle() > pool.getMaximumPoolSize()) {
-                    issues.add(error("datasource.pool.minimum-idle",
-                            "Must be <= maximum-pool-size"));
-                } else if (pool.getMinimumIdle() == pool.getMaximumPoolSize() && pool.getMaximumPoolSize() > 10) {
-                    issues.add(warning("datasource.pool.minimum-idle",
-                            "minimum-idle equals maximum-pool-size; this keeps all connections warm but can waste RAM. Consider elastic pooling (e.g. minimum-idle=5, maximum-pool-size=50)."));
-                }
-            }
-
+            validatePool(base + ".pool", ds.getPool(), issues);
             if (ds.getQueryTimeoutSeconds() < 1 || ds.getQueryTimeoutSeconds() > 600) {
-                issues.add(error("datasource.query-timeout-seconds", "Must be between 1 and 600"));
+                issues.add(error(base + ".query-timeout-seconds", "Must be between 1 and 600"));
             }
         }
+    }
 
-        // --- Kafka (optional) ---
-        var kafka = config.getKafka();
-        if (kafka != null) {
-            if (isBlank(kafka.getBootstrapServers())) {
-                issues.add(error("kafka.bootstrap-servers", "Required when kafka section is present"));
-            }
-            if (isBlank(kafka.getTopic())) {
-                issues.add(error("kafka.topic", "Required when kafka section is present"));
-            }
+    private static void validateStreamInstances(List<EventLensConfig.StreamInstanceConfig> streams, List<ValidationError> issues) {
+        if (streams == null) {
+            return;
         }
-
-        // --- Anomaly rules ---
-        var anomaly = config.getAnomaly();
-        if (anomaly != null && anomaly.getRules() != null) {
-            for (int i = 0; i < anomaly.getRules().size(); i++) {
-                var rule = anomaly.getRules().get(i);
-                String base = "anomaly.rules[%d]".formatted(i);
-                if (rule == null) {
-                    issues.add(error(base, "Rule is null"));
-                    continue;
+        for (int i = 0; i < streams.size(); i++) {
+            var stream = streams.get(i);
+            String base = "streams[%d]".formatted(i);
+            if (stream == null) {
+                issues.add(error(base, "Stream is null"));
+                continue;
+            }
+            if (isBlank(stream.getId())) {
+                issues.add(error(base + ".id", "Required"));
+            }
+            if (isBlank(stream.getType())) {
+                issues.add(error(base + ".type", "Required"));
+            }
+            if ("kafka".equals(stream.getType())) {
+                if (isBlank(stream.getBootstrapServers())) {
+                    issues.add(error(base + ".bootstrap-servers", "Required for kafka streams"));
                 }
-                if (isBlank(rule.getCode())) {
-                    issues.add(error(base + ".code", "Required"));
-                }
-                if (isBlank(rule.getCondition())) {
-                    issues.add(error(base + ".condition",
-                            "Required for rule '%s'".formatted(rule.getCode())));
-                } else {
-                    try {
-                        BisectEngine.parseCondition(rule.getCondition());
-                    } catch (Exception e) {
-                        issues.add(error(base + ".condition",
-                                "Unparseable condition for rule '%s': %s"
-                                        .formatted(rule.getCode(), e.getMessage())));
-                    }
+                if (isBlank(stream.getTopic())) {
+                    issues.add(error(base + ".topic", "Required for kafka streams"));
                 }
             }
         }
+    }
 
-        return issues;
+    private static void validatePool(String base, EventLensConfig.PoolConfig pool, List<ValidationError> issues) {
+        if (pool == null) {
+            return;
+        }
+        if (pool.getMaximumPoolSize() < 1 || pool.getMaximumPoolSize() > 200) {
+            issues.add(error(base + ".maximum-pool-size", "Must be between 1 and 200"));
+        }
+        if (pool.getMinimumIdle() < 0 || pool.getMinimumIdle() > 200) {
+            issues.add(error(base + ".minimum-idle", "Must be between 0 and 200"));
+        }
+        if (pool.getMinimumIdle() > pool.getMaximumPoolSize()) {
+            issues.add(error(base + ".minimum-idle", "Must be <= maximum-pool-size"));
+        } else if (pool.getMinimumIdle() == pool.getMaximumPoolSize() && pool.getMaximumPoolSize() > 10) {
+            issues.add(warning(base + ".minimum-idle",
+                    "minimum-idle equals maximum-pool-size; this keeps all connections warm but can waste RAM. Consider elastic pooling (e.g. minimum-idle=5, maximum-pool-size=50)."));
+        }
+    }
+
+    private static boolean isSupportedDatasourceUrl(String type, String url) {
+        if (type == null || url == null) {
+            return false;
+        }
+        return switch (type.toLowerCase()) {
+            case "postgres" -> url.startsWith("jdbc:postgresql://");
+            case "mysql" -> url.startsWith("jdbc:mysql://");
+            default -> url.startsWith("jdbc:");
+        };
     }
 
     public static void validateOrThrow(EventLensConfig config) {
@@ -198,25 +251,15 @@ public final class ConfigValidator {
         StringBuilder sb = new StringBuilder();
         sb.append("EventLens configuration validation failed.\n\n");
         for (ValidationError i : issues) {
-            String prefix = i.severity() == ValidationError.Severity.ERROR ? "✗" : "⚠";
+            String prefix = i.severity() == ValidationError.Severity.ERROR ? "x" : "!";
             sb.append("  ").append(prefix).append(" ").append(i.path()).append(": ").append(i.message()).append("\n");
         }
         sb.append("\n").append(errors).append(" error(s). EventLens will not start.\n");
         sb.append("Fix the errors above in your eventlens.yaml and restart.\n");
-
         throw new ConfigurationException(sb.toString());
     }
 
-    private static ValidationError error(String path, String message) {
-        return new ValidationError(path, message, ValidationError.Severity.ERROR);
-    }
-
-    private static ValidationError warning(String path, String message) {
-        return new ValidationError(path, message, ValidationError.Severity.WARNING);
-    }
-
-    private static boolean isBlank(String s) {
-        return s == null || s.isBlank();
-    }
+    private static ValidationError error(String path, String message) { return new ValidationError(path, message, ValidationError.Severity.ERROR); }
+    private static ValidationError warning(String path, String message) { return new ValidationError(path, message, ValidationError.Severity.WARNING); }
+    private static boolean isBlank(String s) { return s == null || s.isBlank(); }
 }
-

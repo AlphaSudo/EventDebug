@@ -4,6 +4,7 @@ import { searchAggregates } from '../api/client';
 
 interface Props {
     onSelect: (id: string) => void;
+    source?: string | null;
 }
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -15,20 +16,19 @@ function useDebounce<T>(value: T, delay: number): T {
     return debounced;
 }
 
-export default function SearchBar({ onSelect }: Props) {
+export default function SearchBar({ onSelect, source }: Props) {
     const [query, setQuery] = useState('');
     const [open, setOpen] = useState(false);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const debouncedQuery = useDebounce(query, 300);
 
     const { data: results = [] } = useQuery({
-        queryKey: ['search', debouncedQuery],
-        queryFn: () => searchAggregates(debouncedQuery),
+        queryKey: ['search', debouncedQuery, source ?? 'default'],
+        queryFn: () => searchAggregates(debouncedQuery, 20, source),
         enabled: debouncedQuery.length >= 2,
         staleTime: 5_000,
     });
 
-    // Close dropdown on outside click
     useEffect(() => {
         const handler = (e: MouseEvent) => {
             if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
@@ -39,7 +39,6 @@ export default function SearchBar({ onSelect }: Props) {
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
-    // Cmd/Ctrl+K — focus via custom event from Timeline keyboard handler
     const inputRef = useRef<HTMLInputElement>(null);
     const focus = useCallback(() => {
         inputRef.current?.focus();
@@ -57,7 +56,7 @@ export default function SearchBar({ onSelect }: Props) {
 
     return (
         <div className="search-wrapper" ref={wrapperRef}>
-            <span className="search-icon">🔎</span>
+            <span className="search-icon">??</span>
             <input
                 id="aggregate-search"
                 ref={inputRef}
@@ -85,7 +84,7 @@ export default function SearchBar({ onSelect }: Props) {
                             onClick={() => handleSelect(id)}
                             role="option"
                         >
-                            <span className="search-result-chevron" aria-hidden>→</span>
+                            <span className="search-result-chevron" aria-hidden>?</span>
                             <span className="search-result-body">
                                 <span className="search-result-label">ID</span>
                                 <span className="search-result-colon">:</span>

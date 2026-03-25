@@ -4,6 +4,7 @@ import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.aggregator.ReducerRegistry;
 import io.eventlens.core.engine.*;
 import io.eventlens.core.model.StoredEvent;
+import io.eventlens.core.plugin.PluginManager;
 import io.eventlens.core.spi.EventStoreReader;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -89,7 +90,7 @@ class SecurityHeadersTest {
         var exportEngine = new ExportEngine(reader, replayEngine);
         var diffEngine = new DiffEngine(replayEngine);
 
-        server = new EventLensServer(cfg, reader, replayEngine, bisectEngine, anomalyDetector, exportEngine, diffEngine);
+        server = new EventLensServer(cfg, reader, replayEngine, new ReducerRegistry(), new PluginManager(30), "default", bisectEngine, anomalyDetector, exportEngine, diffEngine);
         server.start();
 
         var client = HttpClient.newHttpClient();
@@ -136,7 +137,7 @@ class SecurityHeadersTest {
         var exportEngine = new ExportEngine(reader, replayEngine);
         var diffEngine = new DiffEngine(replayEngine);
 
-        server = new EventLensServer(cfg, reader, replayEngine, bisectEngine, anomalyDetector, exportEngine, diffEngine);
+        server = new EventLensServer(cfg, reader, replayEngine, new ReducerRegistry(), new PluginManager(30), "default", bisectEngine, anomalyDetector, exportEngine, diffEngine);
         server.start();
 
         var client = HttpClient.newHttpClient();
@@ -180,7 +181,7 @@ class SecurityHeadersTest {
         var exportEngine = new ExportEngine(reader, replayEngine);
         var diffEngine = new DiffEngine(replayEngine);
 
-        server = new EventLensServer(cfg, reader, replayEngine, bisectEngine, anomalyDetector, exportEngine, diffEngine);
+        server = new EventLensServer(cfg, reader, replayEngine, new ReducerRegistry(), new PluginManager(30), "default", bisectEngine, anomalyDetector, exportEngine, diffEngine);
         server.start();
 
         var client = HttpClient.newHttpClient();
@@ -227,7 +228,7 @@ class SecurityHeadersTest {
         var exportEngine = new ExportEngine(reader, replayEngine);
         var diffEngine = new DiffEngine(replayEngine);
 
-        server = new EventLensServer(cfg, reader, replayEngine, bisectEngine, anomalyDetector, exportEngine, diffEngine);
+        server = new EventLensServer(cfg, reader, replayEngine, new ReducerRegistry(), new PluginManager(30), "default", bisectEngine, anomalyDetector, exportEngine, diffEngine);
         server.start();
 
         var client = HttpClient.newHttpClient();
@@ -247,4 +248,5 @@ class SecurityHeadersTest {
         }
     }
 }
+
 
