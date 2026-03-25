@@ -6,7 +6,7 @@ export default function StatisticsPanel({ source }: { source?: string | null }) 
     const { data, isLoading } = useStatistics(source, 1, windowHours);
 
     return (
-        <div className="card statistics-panel" aria-busy={isLoading}>
+        <section className="card statistics-panel" role="region" aria-label="Statistics panel" aria-busy={isLoading}>
             <div className="card-title">Statistics {source ? `- ${source}` : ''}</div>
             <div className="statistics-toolbar">
                 {[6, 24, 72].map(hours => (
@@ -52,6 +52,6 @@ export default function StatisticsPanel({ source }: { source?: string | null }) 
                     </div>
                 </>
             )}
-        </div>
+        </section>
     );
 }

@@ -12,6 +12,7 @@ val npmInstall by tasks.registering(Exec::class) {
     workingDir = projectDir
 
     inputs.file("package.json")
+    inputs.file("package-lock.json")
     outputs.dir("node_modules")
 
     commandLine(
@@ -38,6 +39,47 @@ val npmBuild by tasks.registering(Exec::class) {
     )
 }
 
+val npmTestUnit by tasks.registering(Exec::class) {
+    dependsOn(npmInstall)
+    group = "verification"
+    description = "Run frontend unit tests"
+    workingDir = projectDir
+
+    inputs.dir("src").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file("package.json")
+    inputs.file("package-lock.json")
+
+    commandLine(
+        if (System.getProperty("os.name").lowercase().contains("win")) "npm.cmd" else "npm",
+        "run", "test:unit"
+    )
+}
+
+val npmTestE2e by tasks.registering(Exec::class) {
+    dependsOn(npmInstall)
+    group = "verification"
+    description = "Run frontend Playwright E2E tests"
+    workingDir = projectDir
+
+    inputs.dir("tests/e2e").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir("src").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file("package.json")
+    inputs.file("package-lock.json")
+    inputs.file("playwright.config.ts")
+
+    environment("VITE_EVENTLENS_DEMO", "true")
+    environment("VITE_EVENTLENS_DEMO_ALLOW", "true")
+
+    commandLine(
+        if (System.getProperty("os.name").lowercase().contains("win")) "npm.cmd" else "npm",
+        "run", "test:e2e"
+    )
+}
+
 tasks.named("build") {
     dependsOn(npmBuild)
+}
+
+tasks.named("check") {
+    dependsOn(npmTestUnit)
 }

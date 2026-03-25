@@ -45,7 +45,9 @@ export default function SearchBar({ onSelect, source }: Props) {
         inputRef.current?.select();
     }, []);
     useEffect(() => {
-        document.getElementById('aggregate-search')?.addEventListener('focus', focus as never);
+        const input = document.getElementById('aggregate-search');
+        input?.addEventListener('focus', focus as never);
+        return () => input?.removeEventListener('focus', focus as never);
     }, [focus]);
 
     const handleSelect = (id: string) => {
@@ -73,9 +75,12 @@ export default function SearchBar({ onSelect, source }: Props) {
                     if (e.key === 'Escape') setOpen(false);
                 }}
                 autoComplete="off"
+                aria-expanded={open}
+                aria-controls="aggregate-search-results"
+                aria-autocomplete="list"
             />
             {open && results.length > 0 && (
-                <div className="search-results" role="listbox">
+                <div className="search-results" role="listbox" id="aggregate-search-results">
                     {results.map(id => (
                         <button
                             key={id}

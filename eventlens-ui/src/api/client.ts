@@ -15,6 +15,7 @@ import {
     demoAnomalies,
     demoBisect,
     demoHealth,
+    demoStatistics,
     demoReplayTo,
     demoSearchAggregates,
     demoTimeline,
@@ -139,6 +140,10 @@ export const getRecentEvents = async (limit = 50, source?: string | null) => {
 };
 
 export const getStatistics = async (source?: string | null, bucketHours = 1, maxBuckets = 24) => {
+    if (isDemoMode()) {
+        await delay(30);
+        return demoStatistics(bucketHours, maxBuckets);
+    }
     const path = withOptionalSource(`/v1/statistics?bucketHours=${bucketHours}&maxBuckets=${maxBuckets}`, source);
     return api.get<EventStatistics>(path).then(r => r.data);
 };
@@ -151,12 +156,57 @@ export const getHealth = async () => {
     return api.get('/health').then(r => r.data);
 };
 
-export const getDatasources = async () => api.get<DatasourceSummary[]>('/v1/datasources').then(r => r.data);
+export const getDatasources = async () => {
+    if (isDemoMode()) {
+        await delay(20);
+        return [{
+            id: 'demo-primary',
+            displayName: 'Demo Primary',
+            status: 'ready',
+            healthMessage: 'Frontend demo datasource',
+            capabilities: ['timeline', 'replay', 'statistics'],
+        }];
+    }
+    return api.get<DatasourceSummary[]>('/v1/datasources').then(r => r.data);
+};
 
-export const getDatasourceHealth = async (id: string) =>
-    api.get<DatasourceHealth>(`/v1/datasources/${encodeURIComponent(id)}/health`).then(r => r.data);
+export const getDatasourceHealth = async (id: string) => {
+    if (isDemoMode()) {
+        await delay(20);
+        return {
+            id,
+            displayName: 'Demo Primary',
+            status: 'ready',
+            health: {
+                state: 'up',
+                message: 'Frontend demo datasource',
+            },
+            lastHealthCheck: new Date().toISOString(),
+            failureReason: '',
+        };
+    }
+    return api.get<DatasourceHealth>(`/v1/datasources/${encodeURIComponent(id)}/health`).then(r => r.data);
+};
 
-export const getPlugins = async () => api.get<PluginSummary[]>('/v1/plugins').then(r => r.data);
+export const getPlugins = async () => {
+    if (isDemoMode()) {
+        await delay(20);
+        return [{
+            instanceId: 'demo-source',
+            typeId: 'demo',
+            displayName: 'Demo Source Plugin',
+            pluginType: 'EVENT_SOURCE',
+            lifecycle: 'ready',
+            health: {
+                state: 'up',
+                message: 'Frontend demo plugin',
+            },
+            lastHealthCheck: new Date().toISOString(),
+            failureReason: null,
+        }];
+    }
+    return api.get<PluginSummary[]>('/v1/plugins').then(r => r.data);
+};
 
 export { DEMO_AGGREGATE_ID } from '../demo/demoData';
 

@@ -86,6 +86,7 @@ function PluginHealthPage({ datasources, datasourceHealth, plugins }: {
 }
 
 export default function App() {
+    const [activePanel, setActivePanel] = useState<'state' | 'replay'>('state');
     const [selectedAggregate, setSelectedAggregate] = useState<string | null>(null);
     const [selectedSequence, setSelectedSequence] = useState<number | null>(null);
     const [compareSequence, setCompareSequence] = useState<number | null>(null);
@@ -116,11 +117,13 @@ export default function App() {
         const seq = params.get('seq');
         const compare = params.get('compare');
         const tab = params.get('tab') as TabId | null;
+        const panel = params.get('panel');
         const source = params.get('source');
         if (aggregateId) setSelectedAggregate(aggregateId);
         if (seq) setSelectedSequence(Number(seq));
         if (compare) setCompareSequence(Number(compare));
         if (tab && ['changes', 'before-after', 'raw'].includes(tab)) setActiveTab(tab);
+        if (panel === 'replay' || panel === 'state') setActivePanel(panel);
         if (source) setSelectedSource(source);
     }, []);
 
@@ -130,11 +133,12 @@ export default function App() {
         if (selectedSequence != null) params.set('seq', String(selectedSequence)); else params.delete('seq');
         if (compareSequence != null) params.set('compare', String(compareSequence)); else params.delete('compare');
         params.set('tab', activeTab);
+        params.set('panel', activePanel);
         if (selectedSource) params.set('source', selectedSource); else params.delete('source');
         const qs = params.toString();
         const newUrl = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
         window.history.replaceState(null, '', newUrl);
-    }, [activeTab, compareSequence, selectedAggregate, selectedSequence, selectedSource]);
+    }, [activePanel, activeTab, compareSequence, selectedAggregate, selectedSequence, selectedSource]);
 
     const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 30_000 });
     const { data: datasources = [] } = useQuery({ queryKey: ['datasources'], queryFn: getDatasources, staleTime: 10_000 });
@@ -167,6 +171,7 @@ export default function App() {
         setSelectedAggregate(id);
         setSelectedSequence(null);
         setCompareSequence(null);
+        setActivePanel('state');
         window.location.hash = '#/timeline';
     };
 
@@ -232,7 +237,7 @@ export default function App() {
                 </button>
             </aside>
 
-            <main className="app-main" role="main">
+            <main className="app-main" role="main" aria-label="EventLens workspace">
                 <div className="workspace-content">
                     {!pluginView && !statsView && (
                         <div className="card search-panel card--dropdown-host">
@@ -243,6 +248,7 @@ export default function App() {
                                     Viewing: <span style={{ color: 'var(--neon-cyan)' }}>{selectedAggregate}</span>
                                     {selectedSource ? <span> on {selectedSource}</span> : <span> on primary datasource</span>}
                                     {compareSequence != null && <span> comparing with seq #{compareSequence}</span>}
+                                    <span className="sr-only" aria-live="polite">Current panel {activePanel}</span>
                                     <button className="selection-clear-btn" onClick={() => { setSelectedAggregate(null); setSelectedSequence(null); setCompareSequence(null); }}>&times; clear</button>
                                 </div>
                             )}
@@ -260,7 +266,10 @@ export default function App() {
                                     aggregateId={selectedAggregate}
                                     selectedSequence={selectedSequence}
                                     compareSequence={compareSequence}
-                                    onSelectEvent={setSelectedSequence}
+                                    onSelectEvent={seq => {
+                                        setSelectedSequence(seq);
+                                        setActivePanel('state');
+                                    }}
                                     onSelectCompare={setCompareSequence}
                                     source={selectedSource || null}
                                 />
@@ -271,12 +280,26 @@ export default function App() {
                                     sequence={selectedSequence}
                                     compareSequence={compareSequence}
                                     activeTab={activeTab}
-                                    onTabChange={setActiveTab}
+                                    onTabChange={tab => {
+                                        setActiveTab(tab);
+                                        setActivePanel('state');
+                                    }}
+                                    active={activePanel === 'state'}
+                                    onActivate={() => setActivePanel('state')}
                                     source={selectedSource || null}
                                 />
                             )}
                             {selectedAggregate && transitions.length > 0 && (
-                                <ReplayDebugger transitions={transitions} selectedSequence={selectedSequence} onSelectSequence={setSelectedSequence} />
+                                <ReplayDebugger
+                                    transitions={transitions}
+                                    selectedSequence={selectedSequence}
+                                    onSelectSequence={seq => {
+                                        setSelectedSequence(seq);
+                                        setActivePanel('replay');
+                                    }}
+                                    active={activePanel === 'replay'}
+                                    onActivate={() => setActivePanel('replay')}
+                                />
                             )}
                             <div className="bottom-grid">
                                 <LiveStream source={selectedSource || null} />

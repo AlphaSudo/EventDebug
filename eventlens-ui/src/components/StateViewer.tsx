@@ -10,6 +10,8 @@ interface Props {
     compareSequence?: number | null;
     activeTab?: TabId;
     onTabChange?: (tab: TabId) => void;
+    active?: boolean;
+    onActivate?: () => void;
     source?: string | null;
 }
 
@@ -21,7 +23,7 @@ const TABS: { id: TabId; label: string }[] = [
     { id: 'raw', label: 'Raw JSON' },
 ];
 
-export default function StateViewer({ aggregateId, sequence, compareSequence, activeTab: externalTab, onTabChange, source }: Props) {
+export default function StateViewer({ aggregateId, sequence, compareSequence, activeTab: externalTab, onTabChange, active = false, onActivate, source }: Props) {
     const { data: transitions = [], isLoading } = useReplay(aggregateId, source);
     const [localTab, setLocalTab] = useState<TabId>('changes');
 
@@ -55,7 +57,7 @@ export default function StateViewer({ aggregateId, sequence, compareSequence, ac
     }
 
     return (
-        <div className="card">
+        <section className="card" role="region" aria-label="State viewer" aria-current={active ? 'page' : undefined} onFocus={onActivate}>
             <div className="card-title">
                 State at Event #{primary.event.sequenceNumber}
                 <span className="diff-count-badge">{primary.event.eventType}</span>
@@ -113,6 +115,6 @@ export default function StateViewer({ aggregateId, sequence, compareSequence, ac
                     </div>
                 )}
             </div>
-        </div>
+        </section>
     );
 }

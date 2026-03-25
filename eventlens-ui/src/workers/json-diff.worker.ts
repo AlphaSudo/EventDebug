@@ -17,50 +17,13 @@ export interface DiffResult {
     durationMs: number;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function diffRecursive(left: unknown, right: unknown, path: string, patches: DiffPatch[]): void {
-    if (JSON.stringify(left) === JSON.stringify(right)) {
-        return;
-    }
-
-    if (left === undefined || left === null) {
-        patches.push({ path, type: 'added', newValue: right });
-        return;
-    }
-    if (right === undefined || right === null) {
-        patches.push({ path, type: 'removed', oldValue: left });
-        return;
-    }
-
-    if (Array.isArray(left) && Array.isArray(right)) {
-        const max = Math.max(left.length, right.length);
-        for (let i = 0; i < max; i += 1) {
-            diffRecursive(left[i], right[i], `${path}[${i}]`, patches);
-        }
-        return;
-    }
-
-    if (isObject(left) && isObject(right)) {
-        const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
-        for (const key of keys) {
-            diffRecursive(left[key], right[key], path === '$' ? `$.${key}` : `${path}.${key}`, patches);
-        }
-        return;
-    }
-
-    patches.push({ path, type: 'changed', oldValue: left, newValue: right });
-}
+import { diffJson } from '../utils/jsonDiff';
 
 self.onmessage = (event: MessageEvent<DiffRequest>) => {
     const start = performance.now();
-    const patches: DiffPatch[] = [];
-    diffRecursive(event.data.left, event.data.right, '$', patches);
     const payload: DiffResult = {
         requestId: event.data.requestId,
-        patches,
+        patches: diffJson(event.data.left, event.data.right),
         durationMs: performance.now() - start,
     };
     self.postMessage(payload);

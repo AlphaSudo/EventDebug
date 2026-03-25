@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StoredEvent } from '../api/client';
 import { useTimeline } from '../hooks/useTimeline';
 import { parseEventTimestamp } from '../utils/time';
+import { buildSegments, flattenRows, groupKey, toggleCompareSequence, type TimelineRow } from '../utils/timelineRows';
 
 interface Props {
     aggregateId: string;
@@ -12,28 +13,10 @@ interface Props {
     source?: string | null;
 }
 
-const MIN_SAME_TYPE_RUN = 4;
 const ROW_HEIGHT = 58;
 const VIEWPORT_HEIGHT = 360;
 const OVERSCAN = 6;
 const ZOOM_OPTIONS = [1, 6, 24, 168] as const;
-
-type Segment =
-    | { kind: 'single'; event: StoredEvent; index: number }
-    | { kind: 'group'; eventType: string; items: StoredEvent[]; startIndex: number };
-
-type TimelineRow =
-    | { kind: 'single'; key: string; event: StoredEvent; stepNumber: number }
-    | {
-        kind: 'group';
-        key: string;
-        eventType: string;
-        items: StoredEvent[];
-        startIndex: number;
-        expanded: boolean;
-        containsSelection: boolean;
-    }
-    | { kind: 'group-item'; key: string; event: StoredEvent; stepNumber: number; parentKey: string };
 
 function dotClass(eventType: string): string {
     const t = eventType.toLowerCase();
@@ -43,80 +26,6 @@ function dotClass(eventType: string): string {
     if (t.includes('failed') || t.includes('error') || t.includes('blocked')) return 'failed';
     if (t.includes('transfer')) return 'transfer';
     return 'default';
-}
-
-function buildSegments(events: StoredEvent[]): Segment[] {
-    const out: Segment[] = [];
-    let i = 0;
-    while (i < events.length) {
-        const type = events[i].eventType;
-        let j = i + 1;
-        while (j < events.length && events[j].eventType === type) {
-            j += 1;
-        }
-        const runLen = j - i;
-        if (runLen >= MIN_SAME_TYPE_RUN) {
-            out.push({
-                kind: 'group',
-                eventType: type,
-                items: events.slice(i, j),
-                startIndex: i,
-            });
-        } else {
-            for (let k = i; k < j; k += 1) {
-                out.push({ kind: 'single', event: events[k], index: k });
-            }
-        }
-        i = j;
-    }
-    return out;
-}
-
-function groupKey(startIndex: number, len: number): string {
-    return `${startIndex}-${len}`;
-}
-
-function flattenRows(
-    segments: Segment[],
-    expandedGroupKey: string | null,
-    selectedSequence: number | null,
-): TimelineRow[] {
-    const rows: TimelineRow[] = [];
-    for (const segment of segments) {
-        if (segment.kind === 'single') {
-            rows.push({
-                kind: 'single',
-                key: `single-${segment.event.sequenceNumber}`,
-                event: segment.event,
-                stepNumber: segment.index + 1,
-            });
-            continue;
-        }
-
-        const key = groupKey(segment.startIndex, segment.items.length);
-        const containsSelection = selectedSequence != null
-            && segment.items.some(item => item.sequenceNumber === selectedSequence);
-        const expanded = expandedGroupKey === key;
-        rows.push({
-            kind: 'group',
-            key: `group-${key}`,
-            eventType: segment.eventType,
-            items: segment.items,
-            startIndex: segment.startIndex,
-            expanded,
-            containsSelection,
-        });
-        if (expanded) {
-            rows.push(...segment.items.map((event, index) => ({
-                kind: 'group-item' as const,
-                key: `group-item-${event.sequenceNumber}`,
-                event,
-                stepNumber: segment.startIndex + index + 1,
-                parentKey: key,
-            })));
-        }
-    }
-    return rows;
 }
 
 function firstSequenceForRow(row: TimelineRow): number {
@@ -391,7 +300,7 @@ export default function Timeline({
                                 style={{ position: 'absolute', top, left: 0, right: 0, height: ROW_HEIGHT - 6 }}
                                 onClick={e => {
                                     if (e.shiftKey && onSelectCompare) {
-                                        onSelectCompare(event.sequenceNumber === compareSequence ? null : event.sequenceNumber);
+                                        onSelectCompare(toggleCompareSequence(compareSequence, event.sequenceNumber));
                                     } else {
                                         onSelectEvent(event.sequenceNumber);
                                     }

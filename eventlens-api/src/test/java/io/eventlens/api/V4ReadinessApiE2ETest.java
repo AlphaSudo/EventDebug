@@ -135,6 +135,31 @@ class V4ReadinessApiE2ETest {
         assertThat(selectedEvent.path("payload").asText()).contains("postgres-note");
     }
 
+    @Test
+    void csvExportWorksForSyncAndAsyncRoutes() throws Exception {
+        running = startSystem();
+
+        HttpResponse<String> syncResponse = getResponse("/api/v1/aggregates/" + AGGREGATE_ID + "/export?format=csv");
+        assertThat(syncResponse.headers().firstValue("content-type")).hasValueSatisfying(value -> assertThat(value).contains("text/csv"));
+        assertThat(syncResponse.body()).contains("sequence,event_type,timestamp,payload");
+        assertThat(syncResponse.body()).contains("AccountCreated");
+
+        JsonNode started = postJson("/api/v1/events/export", """
+                {"aggregateId":"SHARED-001","format":"csv","limit":10}
+                """);
+        String exportId = started.path("exportId").asText();
+        assertThat(exportId).startsWith("exp-");
+
+        JsonNode status = waitForCompletedExport(exportId);
+        assertThat(status.path("status").asText()).isEqualTo("COMPLETED");
+        assertThat(status.path("format").asText()).isEqualTo("csv");
+
+        HttpResponse<String> download = getResponse(status.path("downloadUrl").asText());
+        assertThat(download.headers().firstValue("content-type")).hasValueSatisfying(value -> assertThat(value).contains("text/csv"));
+        assertThat(download.body()).contains("sequence,event_type,timestamp,payload");
+        assertThat(download.body()).contains("MoneyDeposited");
+    }
+
     private RunningSystem startSystem() throws Exception {
         createPostgresSchema();
         createMySqlSchema();
@@ -286,16 +311,45 @@ class V4ReadinessApiE2ETest {
     }
 
     private JsonNode getJson(String pathAndQuery) throws Exception {
+        HttpResponse<String> response = getResponse(pathAndQuery);
+        assertThat(response.statusCode())
+                .withFailMessage("Expected 200 for %s but got %s with body %s", pathAndQuery, response.statusCode(), response.body())
+                .isEqualTo(200);
+        return JSON.readTree(response.body());
+    }
+
+    private HttpResponse<String> getResponse(String pathAndQuery) throws Exception {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(running.baseUrl() + pathAndQuery))
                 .timeout(Duration.ofSeconds(15))
                 .GET()
                 .build();
+        return running.client().send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private JsonNode postJson(String pathAndQuery, String body) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(running.baseUrl() + pathAndQuery))
+                .timeout(Duration.ofSeconds(15))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
         HttpResponse<String> response = running.client().send(request, HttpResponse.BodyHandlers.ofString());
-        assertThat(response.statusCode())
-                .withFailMessage("Expected 200 for %s but got %s with body %s", pathAndQuery, response.statusCode(), response.body())
-                .isEqualTo(200);
+        assertThat(response.statusCode()).isEqualTo(202);
         return JSON.readTree(response.body());
+    }
+
+    private JsonNode waitForCompletedExport(String exportId) throws Exception {
+        Instant deadline = Instant.now().plusSeconds(15);
+        JsonNode last = null;
+        while (Instant.now().isBefore(deadline)) {
+            last = getJson("/api/v1/events/export/" + exportId);
+            if ("COMPLETED".equals(last.path("status").asText())) {
+                return last;
+            }
+            Thread.sleep(100);
+        }
+        return last;
     }
 
     private JsonNode waitForDatasourceListStatus(String datasourceId, String expectedStatus) throws Exception {

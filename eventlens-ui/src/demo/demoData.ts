@@ -1,6 +1,7 @@
 import type {
     AnomalyReport,
     BisectResult,
+    EventStatistics,
     FieldChange,
     ReplayResult,
     StateTransition,
@@ -391,4 +392,31 @@ export function demoLiveStreamSeed(): StoredEvent[] {
 
 export function demoHealth(): { status: string; version: string; demo: boolean } {
     return { status: 'UP', version: 'demo', demo: true };
+}
+
+export function demoStatistics(bucketHours = 1, maxBuckets = 24): EventStatistics {
+    const bucketMs = Math.max(bucketHours, 1) * 60 * 60 * 1000;
+    const sorted = [...DEMO_EVENTS].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+    const bucketCounts = new Map<string, number>();
+    const eventTypes = new Map<string, number>();
+    const aggregateTypes = new Map<string, number>();
+
+    for (const event of sorted) {
+        const bucketStart = new Date(Math.floor(Date.parse(event.timestamp) / bucketMs) * bucketMs).toISOString();
+        bucketCounts.set(bucketStart, (bucketCounts.get(bucketStart) ?? 0) + 1);
+        eventTypes.set(event.eventType, (eventTypes.get(event.eventType) ?? 0) + 1);
+        aggregateTypes.set(event.aggregateType, (aggregateTypes.get(event.aggregateType) ?? 0) + 1);
+    }
+
+    return {
+        totalEvents: DEMO_EVENTS.length,
+        distinctAggregates: 1,
+        eventTypes: [...eventTypes.entries()].map(([type, count]) => ({ type, count })),
+        aggregateTypes: [...aggregateTypes.entries()].map(([type, count]) => ({ type, count })),
+        throughput: [...bucketCounts.entries()]
+            .slice(-Math.max(maxBuckets, 1))
+            .map(([bucket, count]) => ({ bucket, count })),
+        available: true,
+        message: null,
+    };
 }

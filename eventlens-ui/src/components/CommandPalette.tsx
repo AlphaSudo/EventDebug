@@ -20,6 +20,7 @@ interface CommandItem {
 export default function CommandPalette({ open, selectedSource, onClose, onSelectAggregate, onOpenStats, onOpenPlugins }: Props) {
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const [previousFocus, setPreviousFocus] = useState<HTMLElement | null>(null);
     const { data: aggregateResults = [] } = useQuery({
         queryKey: ['palette-search', query, selectedSource ?? 'default'],
         queryFn: () => searchAggregates(query, 8, selectedSource),
@@ -30,10 +31,12 @@ export default function CommandPalette({ open, selectedSource, onClose, onSelect
     useEffect(() => {
         if (open) {
             setSelectedIndex(0);
+            setPreviousFocus(document.activeElement instanceof HTMLElement ? document.activeElement : null);
         } else {
             setQuery('');
+            previousFocus?.focus();
         }
-    }, [open]);
+    }, [open, previousFocus]);
 
     const commands = useMemo<CommandItem[]>(() => {
         const base: CommandItem[] = [
@@ -74,7 +77,8 @@ export default function CommandPalette({ open, selectedSource, onClose, onSelect
 
     return (
         <div className="command-palette-backdrop" onClick={onClose}>
-            <div className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" onClick={e => e.stopPropagation()}>
+            <div className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" aria-describedby="command-palette-help" onClick={e => e.stopPropagation()}>
+                <p id="command-palette-help" className="sr-only">Search aggregates, open statistics, or open plugin health. Use arrow keys to move and Enter to confirm.</p>
                 <input
                     autoFocus
                     className="command-palette-input"
@@ -83,7 +87,7 @@ export default function CommandPalette({ open, selectedSource, onClose, onSelect
                     onChange={e => setQuery(e.target.value)}
                     aria-label="Command palette search"
                 />
-                <ul className="command-palette-list" role="listbox">
+                <ul className="command-palette-list" role="listbox" aria-label="Command results">
                     {commands.map((item, index) => (
                         <li
                             key={item.id}

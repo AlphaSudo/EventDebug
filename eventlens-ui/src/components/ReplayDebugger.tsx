@@ -5,20 +5,22 @@ interface Props {
     transitions: StateTransition[];
     selectedSequence: number | null;
     onSelectSequence: (seq: number) => void;
+    active?: boolean;
+    onActivate?: () => void;
 }
 
-export default function ReplayDebugger({ transitions, selectedSequence, onSelectSequence }: Props) {
+export default function ReplayDebugger({ transitions, selectedSequence, onSelectSequence, active = false, onActivate }: Props) {
     if (!transitions.length) return null;
     const current = transitions.find(transition => transition.event.sequenceNumber === selectedSequence) ?? transitions[0];
     const currentIndex = transitions.findIndex(transition => transition.event.sequenceNumber === current.event.sequenceNumber);
 
     return (
-        <div className="card replay-debugger" tabIndex={0}>
+        <section className="card replay-debugger" tabIndex={0} role="region" aria-label="Replay debugger" aria-current={active ? 'page' : undefined} onFocus={onActivate}>
             <div className="card-title">Replay Debugger</div>
             <div className="replay-toolbar">
-                <button type="button" onClick={() => onSelectSequence(transitions[Math.max(currentIndex - 1, 0)].event.sequenceNumber)} title="Step backward">Previous</button>
+                <button type="button" onClick={() => onSelectSequence(transitions[Math.max(currentIndex - 1, 0)].event.sequenceNumber)} title="Step backward" aria-label="Replay previous event">Previous</button>
                 <div className="replay-position">Event {currentIndex + 1} of {transitions.length}</div>
-                <button type="button" onClick={() => onSelectSequence(transitions[Math.min(currentIndex + 1, transitions.length - 1)].event.sequenceNumber)} title="Step forward">Next</button>
+                <button type="button" onClick={() => onSelectSequence(transitions[Math.min(currentIndex + 1, transitions.length - 1)].event.sequenceNumber)} title="Step forward" aria-label="Replay next event">Next</button>
             </div>
             <input
                 type="range"
@@ -32,6 +34,6 @@ export default function ReplayDebugger({ transitions, selectedSequence, onSelect
                 <h4>Current State</h4>
                 <JsonTreeView value={current.stateAfter} changedKeys={new Set(Object.keys(current.diff))} />
             </div>
-        </div>
+        </section>
     );
 }
