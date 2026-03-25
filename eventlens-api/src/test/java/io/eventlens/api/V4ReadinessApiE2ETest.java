@@ -104,6 +104,22 @@ class V4ReadinessApiE2ETest {
     }
 
     @Test
+    void statisticsEndpointReturnsSourceAwareCounts() throws Exception {
+        running = startSystem();
+
+        JsonNode postgresStats = getJson("/api/v1/statistics");
+        JsonNode mysqlStats = getJson("/api/v1/statistics?source=mysql-alt");
+
+        assertThat(postgresStats.path("available").asBoolean()).isTrue();
+        assertThat(postgresStats.path("totalEvents").asLong()).isEqualTo(2);
+        assertThat(postgresStats.at("/eventTypes/0/type").asText()).isEqualTo("AccountCreated");
+
+        assertThat(mysqlStats.path("available").asBoolean()).isTrue();
+        assertThat(mysqlStats.path("totalEvents").asLong()).isEqualTo(2);
+        assertThat(mysqlStats.toString()).contains("OrderCreated");
+    }
+
+    @Test
     void lazyPayloadRoundTripReturnsMetadataThenFullPayload() throws Exception {
         running = startSystem();
 
@@ -336,3 +352,5 @@ class V4ReadinessApiE2ETest {
         }
     }
 }
+
+

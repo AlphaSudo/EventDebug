@@ -5,5 +5,6 @@ export function useReplay(aggregateId: string, source?: string | null) {
     return useQuery({
         queryKey: ['transitions', aggregateId, source ?? 'default'],
         queryFn: () => getTransitions(aggregateId, source),
+        enabled: !!aggregateId,
     });
 }

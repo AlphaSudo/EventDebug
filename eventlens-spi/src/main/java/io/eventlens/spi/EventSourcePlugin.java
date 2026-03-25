@@ -22,6 +22,10 @@ public interface EventSourcePlugin extends AutoCloseable {
         return EventSourceCapabilities.basic();
     }
 
+    default EventStatistics statistics(EventStatisticsQuery query) {
+        return EventStatistics.unavailable("Statistics not available for this source");
+    }
+
     HealthStatus healthCheck();
 
     default JsonNode configSchema() {

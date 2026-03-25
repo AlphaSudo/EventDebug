@@ -46,6 +46,25 @@ class SpiTypesSerializationTest {
     }
 
     @Test
+    void statistics_types_round_trip_json() throws Exception {
+        var stats = new EventStatistics(
+                42,
+                7,
+                java.util.List.of(new EventStatistics.TypeCount("OrderCreated", 20)),
+                java.util.List.of(new EventStatistics.TypeCount("Order", 42)),
+                java.util.List.of(new EventStatistics.ThroughputPoint("2026-03-25T10:00:00Z", 5)),
+                true,
+                null);
+
+        var json = mapper.writeValueAsString(stats);
+        var roundTrip = mapper.readValue(json, EventStatistics.class);
+
+        assertThat(roundTrip).isEqualTo(stats);
+        assertThat(EventStatistics.unavailable("x").available()).isFalse();
+        assertThat(EventStatisticsQuery.defaults().bucketHours()).isEqualTo(1);
+    }
+
+    @Test
     void collections_are_defensively_copied() {
         var details = new java.util.HashMap<String, Object>();
         details.put("k", "v");

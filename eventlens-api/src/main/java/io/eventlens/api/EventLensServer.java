@@ -120,6 +120,7 @@ public class EventLensServer {
                 Duration.ofSeconds(config.getQueryCache().getTimelineTtlSeconds()));
         var datasourceRoutes   = new DatasourceRoutes(sourceRegistry);
         var pluginRoutes       = new PluginRoutes(sourceRegistry);
+        var statisticsRoutes   = new StatisticsRoutes(sourceRegistry);
         var bisectRoutes       = new BisectRoutes(bisectEngine);
         var anomalyRoutes      = new AnomalyRoutes(sourceRegistry, config.getAnomaly(), auditLogger);
         var exportRoutes       = new ExportRoutes(exportEngine, auditLogger);
@@ -334,6 +335,7 @@ public class EventLensServer {
             cfg.routes.get("/api/v1/datasources", datasourceRoutes::list);
             cfg.routes.get("/api/v1/datasources/{id}/health", datasourceRoutes::health);
             cfg.routes.get("/api/v1/plugins", pluginRoutes::list);
+            cfg.routes.get("/api/v1/statistics", statisticsRoutes::get);
 
             // Legacy aggregate routes (no redirect, but marked deprecated)
             cfg.routes.get("/api/aggregates/search", ctx -> {
@@ -497,4 +499,6 @@ public class EventLensServer {
         return ctx.ip();
     }
 }
+
+
 

@@ -1,95 +1,70 @@
-import { useState } from 'react';
-import { FieldChange } from '../api/client';
+import type { DiffPatch, FieldChange } from '../api/client';
 
 interface Props {
-    diff: Record<string, FieldChange>;
+    diff?: Record<string, FieldChange>;
+    patches?: DiffPatch[];
+    title?: string;
 }
 
-type ViewMode = 'inline' | 'split';
+type Row = {
+    field: string;
+    oldValue: unknown;
+    newValue: unknown;
+    kind: 'added' | 'removed' | 'changed';
+};
 
-export default function StateDiff({ diff }: Props) {
-    const entries = Object.entries(diff);
-    const hasDiff = entries.length > 0;
-    const [mode, setMode] = useState<ViewMode>('inline');
+export default function StateDiff({ diff, patches, title = 'Changes' }: Props) {
+    const rows: Row[] = patches && patches.length > 0
+        ? patches.map(patch => ({
+            field: patch.path,
+            oldValue: patch.oldValue,
+            newValue: patch.newValue,
+            kind: patch.type,
+        }))
+        : Object.entries(diff ?? {}).map(([field, change]) => ({
+            field,
+            oldValue: change.oldValue,
+            newValue: change.newValue,
+            kind: 'changed',
+        }));
 
-    if (!hasDiff) return null;
+    if (!rows.length) return null;
 
     return (
         <div className="diff-panel">
             <div className="diff-toolbar">
                 <div className="diff-toolbar-title">
-                    Changes
-                    <span className="diff-count-badge">{entries.length} {entries.length === 1 ? 'field' : 'fields'} modified</span>
-                </div>
-                <div className="diff-view-toggle" role="group" aria-label="Diff layout">
-                    <button
-                        type="button"
-                        className={mode === 'inline' ? 'active' : ''}
-                        onClick={() => setMode('inline')}
-                    >
-                        Inline
-                    </button>
-                    <button
-                        type="button"
-                        className={mode === 'split' ? 'active' : ''}
-                        onClick={() => setMode('split')}
-                    >
-                        Side by side
-                    </button>
+                    {title}
+                    <span className="diff-count-badge" aria-live="polite">
+                        {rows.length} {rows.length === 1 ? 'change' : 'changes'}
+                    </span>
                 </div>
             </div>
-
-            {/* Inline / split modes */}
             <div className="diff-body">
-
-                    <div className="diff-scroll">
-                        {mode === 'inline' ? (
-                            <div className="diff-list diff-list-inline">
-                                {entries.map(([field, change], i) => (
-                                    <div
-                                        key={field}
-                                        className="diff-row"
-                                    >
-                                        <span className="diff-line-no" aria-hidden>{i + 1}</span>
-                                        <div className="diff-row-body">
-                                            <span className="diff-field">{field}</span>
-                                            <span className="diff-values-inline">
-                                                <span className="diff-old">{JSON.stringify(change.oldValue)}</span>
-                                                <span className="diff-arrow">→</span>
-                                                <span className="diff-new">{JSON.stringify(change.newValue)}</span>
-                                            </span>
-                                        </div>
+                <div className="diff-scroll">
+                    <div className="diff-list diff-list-split">
+                        <div className="diff-split-head">
+                            <span className="diff-split-label diff-split-old-label">Before</span>
+                            <span className="diff-split-label diff-split-new-label">After</span>
+                        </div>
+                        {rows.map((row, index) => (
+                            <div key={`${row.field}-${index}`} className={`diff-split-row diff-split-row--${row.kind}`}>
+                                <span className="diff-line-no" aria-hidden>{index + 1}</span>
+                                <div className="diff-split-cells">
+                                    <div className="diff-split-cell diff-split-old">
+                                        <span className="diff-field">{row.field}</span>
+                                        <span className="diff-cell-value">{JSON.stringify(row.oldValue)}</span>
                                     </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="diff-list diff-list-split">
-                                <div className="diff-split-head">
-                                    <span className="diff-split-label diff-split-old-label">Before</span>
-                                    <span className="diff-split-label diff-split-new-label">After</span>
+                                    <div className="diff-split-cell diff-split-new">
+                                        <span className="diff-field">{row.field}</span>
+                                        <span className="diff-cell-value">{JSON.stringify(row.newValue)}</span>
+                                    </div>
                                 </div>
-                                {entries.map(([field, change], i) => (
-                                    <div
-                                        key={field}
-                                        className="diff-split-row"
-                                    >
-                                        <span className="diff-line-no" aria-hidden>{i + 1}</span>
-                                        <div className="diff-split-cells">
-                                            <div className="diff-split-cell diff-split-old">
-                                                <span className="diff-field">{field}</span>
-                                                <span className="diff-cell-value">{JSON.stringify(change.oldValue)}</span>
-                                            </div>
-                                            <div className="diff-split-cell diff-split-new">
-                                                <span className="diff-field">{field}</span>
-                                                <span className="diff-cell-value">{JSON.stringify(change.newValue)}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
                             </div>
-                        )}
+                        ))}
                     </div>
                 </div>
+            </div>
         </div>
     );
 }
