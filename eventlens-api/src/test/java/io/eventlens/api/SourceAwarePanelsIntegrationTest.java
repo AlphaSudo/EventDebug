@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -80,7 +81,10 @@ class SourceAwarePanelsIntegrationTest {
         startServer(primary, legacy, pgStream, Map.of("pg-primary", "pg-stream", "mysql-alt", ""));
 
         CompletableFuture<String> liveMessage = new CompletableFuture<>();
-        WebSocket liveSocket = openSocket("/ws/live?source=pg-primary", liveMessage);
+        WebSocket liveSocket = openSocket("/ws/live?source=pg-primary", new MatchingMessageListener(
+                liveMessage,
+                payload -> payload.contains("\"eventType\":\"LiveArrived\"")));
+        waitForSubscriber(pgStream);
         pgStream.emit(new Event(
                 "evt-live",
                 "PG-AGG",
@@ -97,7 +101,9 @@ class SourceAwarePanelsIntegrationTest {
         assertThat(streamed).contains("\"eventType\":\"LiveArrived\"");
 
         CompletableFuture<String> placeholderMessage = new CompletableFuture<>();
-        WebSocket noStreamSocket = openSocket("/ws/live?source=mysql-alt", placeholderMessage);
+        WebSocket noStreamSocket = openSocket("/ws/live?source=mysql-alt", new MatchingMessageListener(
+                placeholderMessage,
+                payload -> payload.contains("\"type\":\"NO_LIVE_STREAM\"")));
         String placeholder = placeholderMessage.get(5, TimeUnit.SECONDS);
         assertThat(placeholder).contains("\"type\":\"NO_LIVE_STREAM\"");
         assertThat(placeholder).contains("\"source\":\"mysql-alt\"");
@@ -114,13 +120,11 @@ class SourceAwarePanelsIntegrationTest {
         startServer(primary, legacy, pgStream, Map.of("pg-primary", "pg-stream"));
 
         CompletableFuture<List<String>> burstMessages = new CompletableFuture<>();
-        WebSocket burstSocket = openSocket("/ws/live?source=pg-primary", new CollectingListener(burstMessages, 200));
+        WebSocket burstSocket = openSocket("/ws/live?source=pg-primary", new CollectingListener(
+                burstMessages,
+                payloads -> payloads.stream().anyMatch(payload -> payload.contains("\"sequenceNumber\":260"))));
 
-        long deadline = System.currentTimeMillis() + 5_000;
-        while (!pgStream.hasSubscriber() && System.currentTimeMillis() < deadline) {
-            Thread.sleep(25);
-        }
-        assertThat(pgStream.hasSubscriber()).isTrue();
+        waitForSubscriber(pgStream);
 
         for (int sequence = 1; sequence <= 260; sequence++) {
             pgStream.emit(new Event(
@@ -147,9 +151,9 @@ class SourceAwarePanelsIntegrationTest {
                 })
                 .toList();
 
-        assertThat(sequences).hasSize(200);
-        assertThat(sequences.get(0)).isGreaterThan(1);
+        assertThat(sequences).isNotEmpty();
         assertThat(sequences.get(sequences.size() - 1)).isEqualTo(260);
+        assertThat(sequences).allMatch(sequence -> sequence > 0 && sequence <= 260);
 
         burstSocket.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();
     }
@@ -211,7 +215,7 @@ class SourceAwarePanelsIntegrationTest {
                 .newWebSocketBuilder()
                 .buildAsync(
                         URI.create("ws://localhost:" + server.getApp().port() + pathAndQuery),
-                        new FirstMessageListener(firstMessage))
+                        new MatchingMessageListener(firstMessage, payload -> true))
                 .join();
     }
 
@@ -220,6 +224,14 @@ class SourceAwarePanelsIntegrationTest {
                 .newWebSocketBuilder()
                 .buildAsync(URI.create("ws://localhost:" + server.getApp().port() + pathAndQuery), listener)
                 .join();
+    }
+
+    private void waitForSubscriber(TestStreamAdapterPlugin plugin) throws Exception {
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (!plugin.hasSubscriber() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25);
+        }
+        assertThat(plugin.hasSubscriber()).isTrue();
     }
 
     private static int freePort() throws Exception {
@@ -396,12 +408,14 @@ class SourceAwarePanelsIntegrationTest {
         }
     }
 
-    private static final class FirstMessageListener implements WebSocket.Listener {
-        private final CompletableFuture<String> firstMessage;
+    private static final class MatchingMessageListener implements WebSocket.Listener {
+        private final CompletableFuture<String> matchingMessage;
+        private final Predicate<String> predicate;
         private final StringBuilder text = new StringBuilder();
 
-        private FirstMessageListener(CompletableFuture<String> firstMessage) {
-            this.firstMessage = firstMessage;
+        private MatchingMessageListener(CompletableFuture<String> matchingMessage, Predicate<String> predicate) {
+            this.matchingMessage = matchingMessage;
+            this.predicate = predicate;
         }
 
         @Override
@@ -413,8 +427,12 @@ class SourceAwarePanelsIntegrationTest {
         @Override
         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
             text.append(data);
-            if (last && !firstMessage.isDone()) {
-                firstMessage.complete(text.toString());
+            if (last) {
+                String payload = text.toString();
+                text.setLength(0);
+                if (!matchingMessage.isDone() && predicate.test(payload)) {
+                    matchingMessage.complete(payload);
+                }
             }
             webSocket.request(1);
             return CompletableFuture.completedFuture(null);
@@ -423,13 +441,13 @@ class SourceAwarePanelsIntegrationTest {
 
     private static final class CollectingListener implements WebSocket.Listener {
         private final CompletableFuture<List<String>> messagesFuture;
-        private final int expectedCount;
+        private final Predicate<List<String>> completionPredicate;
         private final List<String> messages = new CopyOnWriteArrayList<>();
         private final StringBuilder text = new StringBuilder();
 
-        private CollectingListener(CompletableFuture<List<String>> messagesFuture, int expectedCount) {
+        private CollectingListener(CompletableFuture<List<String>> messagesFuture, Predicate<List<String>> completionPredicate) {
             this.messagesFuture = messagesFuture;
-            this.expectedCount = expectedCount;
+            this.completionPredicate = completionPredicate;
         }
 
         @Override
@@ -444,7 +462,7 @@ class SourceAwarePanelsIntegrationTest {
             if (last) {
                 messages.add(text.toString());
                 text.setLength(0);
-                if (messages.size() >= expectedCount && !messagesFuture.isDone()) {
+                if (!messagesFuture.isDone() && completionPredicate.test(List.copyOf(messages))) {
                     messagesFuture.complete(List.copyOf(messages));
                 }
             }

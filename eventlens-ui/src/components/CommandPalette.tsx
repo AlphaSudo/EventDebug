@@ -7,8 +7,8 @@ interface Props {
     selectedSource?: string | null;
     onClose: () => void;
     onSelectAggregate: (id: string) => void;
+    onOpenHome: () => void;
     onOpenStats: () => void;
-    onOpenPlugins: () => void;
 }
 
 interface CommandItem {
@@ -17,7 +17,7 @@ interface CommandItem {
     action: () => void;
 }
 
-export default function CommandPalette({ open, selectedSource, onClose, onSelectAggregate, onOpenStats, onOpenPlugins }: Props) {
+export default function CommandPalette({ open, selectedSource, onClose, onSelectAggregate, onOpenHome, onOpenStats }: Props) {
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [previousFocus, setPreviousFocus] = useState<HTMLElement | null>(null);
@@ -40,8 +40,8 @@ export default function CommandPalette({ open, selectedSource, onClose, onSelect
 
     const commands = useMemo<CommandItem[]>(() => {
         const base: CommandItem[] = [
+            { id: 'home', label: 'Go to main page', action: onOpenHome },
             { id: 'stats', label: 'Go to statistics panel', action: onOpenStats },
-            { id: 'plugins', label: 'Go to plugin health', action: onOpenPlugins },
         ];
         const aggregateCommands = aggregateResults.map(id => ({
             id: `agg-${id}`,
@@ -52,7 +52,7 @@ export default function CommandPalette({ open, selectedSource, onClose, onSelect
             base.unshift({ id: 'direct', label: `Open aggregate ${query.trim()}`, action: () => onSelectAggregate(query.trim()) });
         }
         return [...aggregateCommands, ...base];
-    }, [aggregateResults, onOpenPlugins, onOpenStats, onSelectAggregate, query]);
+    }, [aggregateResults, onOpenHome, onOpenStats, onSelectAggregate, query]);
 
     useEffect(() => {
         if (!open) return;
@@ -78,7 +78,7 @@ export default function CommandPalette({ open, selectedSource, onClose, onSelect
     return (
         <div className="command-palette-backdrop" onClick={onClose}>
             <div className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" aria-describedby="command-palette-help" onClick={e => e.stopPropagation()}>
-                <p id="command-palette-help" className="sr-only">Search aggregates, open statistics, or open plugin health. Use arrow keys to move and Enter to confirm.</p>
+                <p id="command-palette-help" className="sr-only">Search aggregates, return to the main page, or open statistics. Use arrow keys to move and Enter to confirm.</p>
                 <input
                     autoFocus
                     className="command-palette-input"

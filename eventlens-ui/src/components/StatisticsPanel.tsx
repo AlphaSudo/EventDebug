@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import { useStatistics } from '../hooks/useStatistics';
 
-export default function StatisticsPanel({ source }: { source?: string | null }) {
+export default function StatisticsPanel({ source, onBack }: { source?: string | null; onBack: () => void }) {
     const [windowHours, setWindowHours] = useState(24);
     const { data, isLoading } = useStatistics(source, 1, windowHours);
 
     return (
         <section className="card statistics-panel" role="region" aria-label="Statistics panel" aria-busy={isLoading}>
-            <div className="card-title">Statistics {source ? `- ${source}` : ''}</div>
+            <div className="statistics-panel-header">
+                <div className="card-title">Statistics {source ? `- ${source}` : ''}</div>
+                <button type="button" className="statistics-back-btn" onClick={onBack}>Back to workspace</button>
+            </div>
             <div className="statistics-toolbar">
                 {[6, 24, 72].map(hours => (
                     <button

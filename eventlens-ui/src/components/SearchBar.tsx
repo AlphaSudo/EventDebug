@@ -5,6 +5,7 @@ import { searchAggregates } from '../api/client';
 interface Props {
     onSelect: (id: string) => void;
     source?: string | null;
+    selectedValue?: string | null;
 }
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -16,7 +17,7 @@ function useDebounce<T>(value: T, delay: number): T {
     return debounced;
 }
 
-export default function SearchBar({ onSelect, source }: Props) {
+export default function SearchBar({ onSelect, source, selectedValue }: Props) {
     const [query, setQuery] = useState('');
     const [open, setOpen] = useState(false);
     const wrapperRef = useRef<HTMLDivElement>(null);
@@ -28,6 +29,10 @@ export default function SearchBar({ onSelect, source }: Props) {
         enabled: debouncedQuery.length >= 2,
         staleTime: 5_000,
     });
+
+    useEffect(() => {
+        setQuery(selectedValue ?? '');
+    }, [selectedValue]);
 
     useEffect(() => {
         const handler = (e: MouseEvent) => {

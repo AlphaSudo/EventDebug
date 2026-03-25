@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import SearchBar from './components/SearchBar';
 import Timeline from './components/Timeline';
 import StateViewer, { type TabId } from './components/StateViewer';
@@ -11,24 +11,14 @@ import StatisticsPanel from './components/StatisticsPanel';
 import CommandPalette from './components/CommandPalette';
 import KeyboardManager from './components/KeyboardManager';
 import {
-    getDatasourceHealth,
     getDatasources,
     getHealth,
     getPlugins,
+    getRecentEvents,
     getTimeline,
-    type DatasourceHealth,
-    type DatasourceSummary,
-    type PluginSummary,
 } from './api/client';
 import { isDemoMode } from './demo/demoMode';
 import { useReplay } from './hooks/useReplay';
-
-function statusTone(status: string) {
-    const normalized = status.toLowerCase();
-    if (normalized === 'ready' || normalized === 'up') return '#00ff88';
-    if (normalized === 'degraded' || normalized === 'initializing') return '#ffd166';
-    return '#ff6b6b';
-}
 
 function isHealthyStatus(status: string) {
     const normalized = status.toLowerCase();
@@ -39,47 +29,96 @@ function isSelectableDatasource(status: string) {
     return status.toLowerCase() === 'ready';
 }
 
-function PluginHealthPage({ datasources, datasourceHealth, plugins }: {
-    datasources: DatasourceSummary[];
-    datasourceHealth: Array<DatasourceHealth | undefined>;
-    plugins: PluginSummary[];
-}) {
+function MiniWaveform() {
+    const bars = [6, 12, 8, 16, 10, 14, 7, 11, 15, 9];
     return (
-        <div className="plugin-dashboard">
-            <div className="card">
-                <div className="card-title">Datasources</div>
-                <div className="plugin-cards-grid">
-                    {datasources.map((source, index) => {
-                        const health = datasourceHealth[index];
-                        const tone = statusTone(source.status);
-                        return (
-                            <article key={source.id} className="plugin-card plugin-card--interactive" style={{ borderLeft: `3px solid ${tone}` }}>
-                                <div className="plugin-card-head">
-                                    <strong>{source.displayName}</strong>
-                                    <span className="plugin-pill" style={{ color: tone, borderColor: `${tone}55` }}>{source.status}</span>
-                                </div>
-                                <div className="plugin-card-meta">{source.id}</div>
-                                {health && <div className="plugin-card-detail">{health.health.message}{health.failureReason ? ` | ${health.failureReason}` : ''}</div>}
-                            </article>
-                        );
-                    })}
-                </div>
+        <div className="mini-wave" aria-hidden>
+            {bars.map((height, index) => (
+                <div
+                    key={index}
+                    className="mini-wave-bar"
+                    style={{ height, animationDelay: `${index * 0.1}s` }}
+                />
+            ))}
+        </div>
+    );
+}
+
+function ConnectionStats({
+    isUp,
+    selectedSource,
+    fallbackCount,
+}: {
+    isUp: boolean;
+    selectedSource: string;
+    fallbackCount: number | null;
+}) {
+    const [uptime, setUptime] = useState(0);
+    const [eventCount, setEventCount] = useState<number | null>(fallbackCount);
+    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    useEffect(() => {
+        const start = Date.now();
+        intervalRef.current = setInterval(() => {
+            setUptime(Math.floor((Date.now() - start) / 1000));
+        }, 1000);
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        setEventCount(fallbackCount);
+    }, [fallbackCount]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const fetchCount = () => {
+            getRecentEvents(500, selectedSource || null)
+                .then(data => {
+                    if (!cancelled) {
+                        setEventCount(data.length);
+                    }
+                })
+                .catch(() => {
+                    if (!cancelled && fallbackCount != null) {
+                        setEventCount(fallbackCount);
+                    }
+                });
+        };
+
+        fetchCount();
+        const id = setInterval(fetchCount, 15_000);
+        return () => {
+            cancelled = true;
+            clearInterval(id);
+        };
+    }, [fallbackCount, selectedSource]);
+
+    const formatUptime = (seconds: number) => {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        return hours > 0 ? `${hours}h ${minutes}m` : minutes > 0 ? `${minutes}m ${secs}s` : `${secs}s`;
+    };
+
+    return (
+        <div className="conn-stats" aria-label="Connection metrics">
+            <MiniWaveform />
+            <div className="conn-stat">
+                <span className="conn-stat-label">API</span>
+                <span className={`conn-stat-value ${isUp ? 'green' : 'amber'}`}>{isUp ? 'Healthy' : 'Down'}</span>
             </div>
-            <div className="card">
-                <div className="card-title">All Plugins</div>
-                <div className="plugin-cards-grid plugin-cards-grid--dense">
-                    {plugins.map(plugin => (
-                        <article key={plugin.instanceId} className="plugin-card plugin-card--interactive">
-                            <div className="plugin-card-head">
-                                <strong>{plugin.displayName}</strong>
-                                <span className="plugin-pill" style={{ color: statusTone(plugin.lifecycle), borderColor: `${statusTone(plugin.lifecycle)}55` }}>{plugin.lifecycle}</span>
-                            </div>
-                            <div className="plugin-card-meta">{plugin.pluginType} | {plugin.typeId}</div>
-                            <div className="plugin-card-meta">{plugin.instanceId}</div>
-                            <div className="plugin-card-detail">{plugin.health.message}{plugin.failureReason ? ` | ${plugin.failureReason}` : ''}</div>
-                        </article>
-                    ))}
-                </div>
+            <div className="conn-stat conn-stat--metric">
+                <span className="conn-stat-label">Events</span>
+                <span className="conn-stat-value">{eventCount ?? '...'}</span>
+            </div>
+            <div className="conn-stat">
+                <span className="conn-stat-label">Uptime</span>
+                <span className="conn-stat-value green conn-stat-value--uptime">{formatUptime(uptime)}</span>
             </div>
         </div>
     );
@@ -101,6 +140,12 @@ export default function App() {
         window.addEventListener('hashchange', syncHash);
         return () => window.removeEventListener('hashchange', syncHash);
     }, []);
+
+    useEffect(() => {
+        if (currentHash === '#/plugins') {
+            window.location.hash = '#/timeline';
+        }
+    }, [currentHash]);
 
     useEffect(() => {
         const handler = (e: Event) => {
@@ -143,14 +188,6 @@ export default function App() {
     const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 30_000 });
     const { data: datasources = [] } = useQuery({ queryKey: ['datasources'], queryFn: getDatasources, staleTime: 10_000 });
     const { data: plugins = [] } = useQuery({ queryKey: ['plugins'], queryFn: getPlugins, staleTime: 10_000 });
-    const datasourceHealthQueries = useQueries({
-        queries: datasources.map(source => ({
-            queryKey: ['datasource-health', source.id],
-            queryFn: () => getDatasourceHealth(source.id),
-            staleTime: 10_000,
-        })),
-    });
-    const datasourceHealth = datasourceHealthQueries.map(query => query.data);
     const { data: transitions = [] } = useReplay(selectedAggregate ?? '', selectedSource || null);
 
     const { data: timelineSummary } = useQuery({
@@ -161,7 +198,6 @@ export default function App() {
     });
 
     const isUp = health?.status === 'UP';
-    const pluginView = currentHash === '#/plugins';
     const statsView = currentHash === '#/stats';
     const healthySources = datasources.filter(source => isHealthyStatus(source.status)).length;
     const healthyPlugins = plugins.filter(plugin => isHealthyStatus(plugin.lifecycle)).length;
@@ -175,6 +211,10 @@ export default function App() {
         window.location.hash = '#/timeline';
     };
 
+    const openMainPage = () => {
+        window.location.hash = '#/timeline';
+    };
+
     return (
         <div className="app">
             <KeyboardManager paletteOpen={paletteOpen} onOpenPalette={() => setPaletteOpen(true)} onClosePalette={() => setPaletteOpen(false)} />
@@ -183,8 +223,8 @@ export default function App() {
                 selectedSource={selectedSource || null}
                 onClose={() => setPaletteOpen(false)}
                 onSelectAggregate={openAggregate}
+                onOpenHome={openMainPage}
                 onOpenStats={() => { window.location.hash = '#/stats'; }}
-                onOpenPlugins={() => { window.location.hash = '#/plugins'; }}
             />
             <header className="app-header">
                 <div className="brand">
@@ -198,6 +238,7 @@ export default function App() {
                     <div className="header-title">EventLens</div>
                 </div>
                 <div className="header-actions">
+                    <ConnectionStats isUp={isUp} selectedSource={selectedSource} fallbackCount={timelineSummary?.totalEvents ?? null} />
                     <div className="header-status">
                         <span className={`dot ${isUp ? 'dot-green' : 'dot-red'}`} />
                         <span className={`status-text ${isUp ? '' : 'offline'}`}>{isUp ? 'Connected' : health?.status ?? 'Connecting'}</span>
@@ -239,10 +280,10 @@ export default function App() {
 
             <main className="app-main" role="main" aria-label="EventLens workspace">
                 <div className="workspace-content">
-                    {!pluginView && !statsView && (
+                    {!statsView && (
                         <div className="card search-panel card--dropdown-host">
                             <label className="control-field-label" htmlFor="aggregate-search">Search Aggregates</label>
-                            <SearchBar onSelect={openAggregate} source={selectedSource || null} />
+                            <SearchBar onSelect={openAggregate} source={selectedSource || null} selectedValue={selectedAggregate} />
                             {selectedAggregate && (
                                 <div className="selection-summary">
                                     Viewing: <span style={{ color: 'var(--neon-cyan)' }}>{selectedAggregate}</span>
@@ -255,10 +296,8 @@ export default function App() {
                         </div>
                     )}
 
-                    {pluginView ? (
-                        <PluginHealthPage datasources={datasources} datasourceHealth={datasourceHealth} plugins={plugins} />
-                    ) : statsView ? (
-                        <StatisticsPanel source={selectedSource || null} />
+                    {statsView ? (
+                        <StatisticsPanel source={selectedSource || null} onBack={openMainPage} />
                     ) : (
                         <>
                             {selectedAggregate && (
@@ -293,17 +332,19 @@ export default function App() {
                                 <ReplayDebugger
                                     transitions={transitions}
                                     selectedSequence={selectedSequence}
+                                    compareSequence={compareSequence}
                                     onSelectSequence={seq => {
                                         setSelectedSequence(seq);
                                         setActivePanel('replay');
                                     }}
+                                    onClearCompare={() => setCompareSequence(null)}
                                     active={activePanel === 'replay'}
                                     onActivate={() => setActivePanel('replay')}
                                 />
                             )}
                             <div className="bottom-grid">
-                                <LiveStream source={selectedSource || null} />
-                                <AnomalyPanel source={selectedSource || null} />
+                                <LiveStream source={selectedSource || null} onSelectAggregate={openAggregate} />
+                                <AnomalyPanel source={selectedSource || null} onSelectAggregate={openAggregate} />
                             </div>
                             {selectedAggregate && timelineSummary && (
                                 <div className="card">
