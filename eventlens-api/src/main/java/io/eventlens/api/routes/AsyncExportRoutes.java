@@ -2,6 +2,7 @@ package io.eventlens.api.routes;
 
 import io.eventlens.api.export.ExportJob;
 import io.eventlens.api.export.ExportService;
+import io.eventlens.api.http.SecurityContext;
 import io.eventlens.core.InputValidator;
 import io.javalin.http.Context;
 
@@ -36,10 +37,10 @@ public final class AsyncExportRoutes {
                 req.format,
                 limit,
                 Map.of(
-                        "userId", userId(ctx),
-                        "authMethod", authMethod(ctx),
-                        "clientIp", clientIp(ctx),
-                        "requestId", requestId(ctx),
+                        "userId", SecurityContext.principal(ctx).userId(),
+                        "authMethod", SecurityContext.principal(ctx).authMethod(),
+                        "clientIp", SecurityContext.clientIp(ctx),
+                        "requestId", SecurityContext.requestId(ctx),
                         "userAgent", ctx.userAgent() != null ? ctx.userAgent() : "unknown"
                 ));
 
@@ -63,8 +64,11 @@ public final class AsyncExportRoutes {
             long fileSize = 0L;
             try {
                 var f = job.file();
-                if (f != null && Files.exists(f)) fileSize = Files.size(f);
-            } catch (Exception ignored) {}
+                if (f != null && Files.exists(f)) {
+                    fileSize = Files.size(f);
+                }
+            } catch (Exception ignored) {
+            }
 
             ctx.json(Map.of(
                     "exportId", job.exportId(),
@@ -118,32 +122,4 @@ public final class AsyncExportRoutes {
             ctx.status(500).json(Map.of("error", "download_failed", "message", e.getMessage()));
         }
     }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    private static String userId(Context ctx) {
-        String v = ctx.attribute("auditUserId");
-        return v != null ? v : "anonymous";
-    }
-
-    private static String authMethod(Context ctx) {
-        String v = ctx.attribute("auditAuthMethod");
-        return v != null ? v : "anonymous";
-    }
-
-    private static String clientIp(Context ctx) {
-        String xff = ctx.header("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int c = xff.indexOf(',');
-            return (c >= 0 ? xff.substring(0, c) : xff).trim();
-        }
-        String xri = ctx.header("X-Real-IP");
-        return xri != null && !xri.isBlank() ? xri.trim() : ctx.ip();
-    }
-
-    private static String requestId(Context ctx) {
-        String v = ctx.attribute("requestId");
-        return v != null ? v : "unknown";
-    }
 }
-

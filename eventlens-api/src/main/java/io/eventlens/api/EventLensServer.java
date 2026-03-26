@@ -5,10 +5,12 @@ import io.eventlens.api.routes.*;
 import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.api.websocket.LiveTailWebSocket;
 import io.eventlens.api.export.ExportService;
+import io.eventlens.api.http.SecurityContext;
 import io.eventlens.api.shutdown.GracefulShutdown;
 import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.routes.MetricsRoutes;
 import io.eventlens.api.http.RequestContextMdcFilter;
+import io.eventlens.api.security.BasicAuthenticator;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.aggregator.ReducerRegistry;
 import io.eventlens.core.RateLimiter;
@@ -18,6 +20,7 @@ import io.eventlens.core.engine.*;
 import io.eventlens.core.exception.QueryTimeoutException;
 import io.eventlens.core.pii.PiiMasker;
 import io.eventlens.core.plugin.PluginManager;
+import io.eventlens.core.security.Principal;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.Javalin;
 import io.javalin.compression.CompressionStrategy;
@@ -179,6 +182,7 @@ public class EventLensServer {
                 }
                 ctx.header("X-Request-Id", requestId);
                 ctx.attribute("requestId", requestId);
+                SecurityContext.setPrincipal(ctx, Principal.anonymous());
 
                 // 4.2 Structured logging context (MDC)
                 new RequestContextMdcFilter().handle(ctx);
@@ -231,7 +235,7 @@ public class EventLensServer {
 
             if (rateLimiter != null) {
                 cfg.routes.before("/api/*", ctx -> {
-                    String clientIp = extractClientIp(ctx);
+                    String clientIp = SecurityContext.clientIp(ctx);
                     var result = rateLimiter.tryConsume(clientIp);
 
                     ctx.header("X-RateLimit-Limit", String.valueOf(result.limitPerMinute()));
@@ -251,64 +255,51 @@ public class EventLensServer {
             }
 
             if (authConfig.isEnabled()) {
+                var basicAuthenticator = new BasicAuthenticator(
+                        authConfig.getUsername(),
+                        authConfig.getPassword(),
+                        "EventLens");
                 if ("changeme".equals(authConfig.getPassword())) {
                     log.warn("Basic auth is enabled with default password 'changeme'. Change server.auth.password in production.");
                 }
-                String expectedAuth = authConfig.getUsername() + ":" + authConfig.getPassword();
 
                 cfg.routes.before("/api/*", ctx -> {
-                    String clientIp = extractClientIp(ctx);
-                    String requestId = ctx.attribute("requestId");
-                    String userAgent = ctx.userAgent();
-                    String suppliedUser = ctx.basicAuthCredentials() != null
-                            ? ctx.basicAuthCredentials().getUsername() : null;
-                    String auth = ctx.basicAuthCredentials() != null
-                            ? suppliedUser + ":" + ctx.basicAuthCredentials().getPassword()
-                            : null;
-
-                    if (!expectedAuth.equals(auth)) {
-                        // 1.8 — emit LOGIN_FAILED
-                        auditLogger.log(AuditEvent.builder()
+                    var authResult = basicAuthenticator.authenticate(ctx);
+                    if (!authResult.success()) {
+                        // 1.8 - emit LOGIN_FAILED
+                        auditLogger.log(SecurityContext.audit(ctx)
                                 .action(AuditEvent.ACTION_LOGIN_FAILED)
                                 .resourceType(AuditEvent.RT_AUTH)
-                                .userId(suppliedUser != null ? suppliedUser : "anonymous")
+                                .userId(authResult.attemptedUserId() != null ? authResult.attemptedUserId() : "anonymous")
                                 .authMethod("basic")
-                                .clientIp(clientIp)
-                                .requestId(requestId != null ? requestId : "unknown")
-                                .userAgent(userAgent)
-                                .details(Map.of("reason", "invalid_credentials", "path", ctx.path()))
+                                .details(Map.of("reason", authResult.failureReason(), "path", ctx.path()))
                                 .build());
 
                         ctx.status(401)
-                                .header("WWW-Authenticate", "Basic realm=\"EventLens\"")
+                                .header("WWW-Authenticate", authResult.challengeHeader())
                                 .json(Map.of("error", "Unauthorized"));
                         ctx.skipRemainingHandlers();
                     } else {
-                        // 1.8 — emit LOGIN success (once per request, not once per session)
-                        auditLogger.log(AuditEvent.builder()
+                        SecurityContext.setPrincipal(ctx, authResult.principal());
+                        new RequestContextMdcFilter().handle(ctx);
+                        // 1.8 - emit LOGIN success (once per request, not once per session)
+                        auditLogger.log(SecurityContext.audit(ctx)
                                 .action(AuditEvent.ACTION_LOGIN)
                                 .resourceType(AuditEvent.RT_AUTH)
-                                .userId(suppliedUser)
-                                .authMethod("basic")
-                                .clientIp(clientIp)
-                                .requestId(requestId != null ? requestId : "unknown")
-                                .userAgent(userAgent)
                                 .details(Map.of("path", ctx.path()))
                                 .build());
-                        // Store principal for downstream audit events
-                        ctx.attribute("auditUserId", suppliedUser);
-                        ctx.attribute("auditAuthMethod", "basic");
                     }
                 });
                 cfg.routes.before("/ws/*", ctx -> {
-                    String auth = ctx.basicAuthCredentials() != null
-                            ? ctx.basicAuthCredentials().getUsername() + ":" + ctx.basicAuthCredentials().getPassword()
-                            : null;
-                    if (!expectedAuth.equals(auth)) {
+                    var authResult = basicAuthenticator.authenticate(ctx);
+                    if (!authResult.success()) {
                         ctx.status(401)
-                                .header("WWW-Authenticate", "Basic realm=\"EventLens\"")
+                                .header("WWW-Authenticate", authResult.challengeHeader())
                                 .json(Map.of("error", "Unauthorized"));
                         ctx.skipRemainingHandlers();
+                    } else {
+                        SecurityContext.setPrincipal(ctx, authResult.principal());
+                        new RequestContextMdcFilter().handle(ctx);
                     }
                 });
                 log.info("Basic auth ENABLED for /api/* and /ws/*");
@@ -486,19 +477,5 @@ public class EventLensServer {
         ctx.header("Sunset", "2026-01-01");
         ctx.header("Link", "<" + successor + ">; rel=\"successor-version\"");
     }
-
-    private static String extractClientIp(io.javalin.http.Context ctx) {
-        String xff = ctx.header("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int comma = xff.indexOf(',');
-            String first = (comma >= 0 ? xff.substring(0, comma) : xff).trim();
-            if (!first.isBlank()) return first;
-        }
-        String xri = ctx.header("X-Real-IP");
-        if (xri != null && !xri.isBlank()) return xri.trim();
-        return ctx.ip();
-    }
 }
-
-
 

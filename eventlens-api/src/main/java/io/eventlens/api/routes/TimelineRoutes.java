@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import io.eventlens.api.cache.QueryResultCache;
 import io.eventlens.api.http.ConditionalGet;
+import io.eventlens.api.http.SecurityContext;
 import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.core.InputValidator;
 import io.eventlens.core.audit.AuditEvent;
@@ -65,15 +66,10 @@ public class TimelineRoutes {
                 timelineTtl,
                 () -> buildTimelineEnvelope(source, id, limit, offset, cursorParam, fields));
 
-        auditLogger.log(AuditEvent.builder()
+        auditLogger.log(SecurityContext.audit(ctx)
                 .action(AuditEvent.ACTION_VIEW_TIMELINE)
                 .resourceType(AuditEvent.RT_AGGREGATE)
                 .resourceId(id)
-                .userId(userId(ctx))
-                .authMethod(authMethod(ctx))
-                .clientIp(clientIp(ctx))
-                .requestId(requestId(ctx))
-                .userAgent(ctx.userAgent())
                 .details(Map.of(
                         "limit", limit,
                         "offset", offset,
@@ -221,33 +217,6 @@ public class TimelineRoutes {
             return event;
         }
     }
-
-    private static String userId(Context ctx) {
-        String v = ctx.attribute("auditUserId");
-        return v != null ? v : "anonymous";
-    }
-
-    private static String authMethod(Context ctx) {
-        String v = ctx.attribute("auditAuthMethod");
-        return v != null ? v : "anonymous";
-    }
-
-    private static String clientIp(Context ctx) {
-        String xff = ctx.header("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int c = xff.indexOf(',');
-            return (c >= 0 ? xff.substring(0, c) : xff).trim();
-        }
-        String xri = ctx.header("X-Real-IP");
-        return xri != null && !xri.isBlank() ? xri.trim() : ctx.ip();
-    }
-
-    private static String requestId(Context ctx) {
-        String v = ctx.attribute("requestId");
-        return v != null ? v : "unknown";
-    }
-
     private record TimelineEnvelope(AggregateTimeline timeline, boolean hasMore, String nextCursor) {
     }
 }
-
