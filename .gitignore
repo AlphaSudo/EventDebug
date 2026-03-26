@@ -44,6 +44,7 @@ eventlens.yaml
 
 # Test runtime
 .testcontainers.properties
+eventlens-api/exports/
 
 # Local AI agent rules / dev tooling config
 .agents/
