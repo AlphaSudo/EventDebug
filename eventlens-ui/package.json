@@ -6,7 +6,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.95.2",
@@ -15,7 +18,9 @@
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.54.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
@@ -24,7 +29,8 @@
     "globals": "^17.4.0",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.57.1",
-    "vite": "^8.0.2"
+    "vite": "^8.0.2",
+    "vitest": "^4.0.7"
   },
   "overrides": {
     "esbuild": "^0.27.4"

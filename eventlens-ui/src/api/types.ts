@@ -86,3 +86,20 @@ export interface LiveStreamUnavailableMessage {
     type: 'NO_LIVE_STREAM';
     source: string;
 }
+
+export interface DiffPatch {
+    path: string;
+    type: 'added' | 'removed' | 'changed';
+    oldValue?: unknown;
+    newValue?: unknown;
+}
+
+export interface EventStatistics {
+    totalEvents: number;
+    distinctAggregates: number;
+    eventTypes: Array<{ type: string; count: number }>;
+    aggregateTypes: Array<{ type: string; count: number }>;
+    throughput: Array<{ bucket: string; count: number }>;
+    available: boolean;
+    message: string | null;
+}

@@ -4,10 +4,13 @@ import io.eventlens.core.aggregator.ReducerRegistry;
 import io.eventlens.core.engine.ReplayEngine;
 import io.eventlens.core.plugin.DatasourceListingModel;
 import io.eventlens.core.plugin.PluginInstance;
-import io.eventlens.spi.HealthStatus;
 import io.eventlens.core.plugin.PluginListingModel;
 import io.eventlens.core.plugin.PluginManager;
 import io.eventlens.core.spi.EventStoreReader;
+import io.eventlens.spi.EventSourcePlugin;
+import io.eventlens.spi.EventStatistics;
+import io.eventlens.spi.EventStatisticsQuery;
+import io.eventlens.spi.HealthStatus;
 import io.eventlens.spi.PluginLifecycle;
 
 import java.util.Comparator;
@@ -15,7 +18,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class SourceRegistry {
@@ -102,6 +104,19 @@ public final class SourceRegistry {
                 .sorted(Comparator.comparing(PluginInstance::instanceId))
                 .map(PluginListingModel::from)
                 .toList();
+    }
+
+    public EventStatistics statistics(String requestedSourceId, EventStatisticsQuery query) {
+        if (requestedSourceId == null || requestedSourceId.isBlank() || requestedSourceId.equals(defaultSourceId)) {
+            return pluginManager.getEventSource(defaultSourceId)
+                    .or(() -> pluginManager.getFirstReadyEventSource())
+                    .map(plugin -> plugin.statistics(query))
+                    .orElse(EventStatistics.unavailable("Statistics not available for the primary datasource"));
+        }
+
+        EventSourcePlugin plugin = pluginManager.getEventSource(requestedSourceId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown datasource: " + requestedSourceId));
+        return plugin.statistics(query);
     }
 
     public record ResolvedSource(

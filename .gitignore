@@ -44,6 +44,7 @@ eventlens.yaml
 
 # Test runtime
 .testcontainers.properties
+eventlens-api/exports/
 
 # Local AI agent rules / dev tooling config
 .agents/
@@ -51,6 +52,9 @@ eventlens.yaml
 
 #personal files
 tests/
+!eventlens-ui/tests/
+!eventlens-ui/tests/e2e/
+!eventlens-ui/tests/e2e/*.ts
 versions/
 loadtests/
 plans/

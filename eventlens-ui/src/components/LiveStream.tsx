@@ -38,8 +38,14 @@ function eventIcon(t: string): string {
     return '\u25C6';
 }
 
-export default function LiveStream({ source }: { source?: string | null }) {
-    return <SourceAwareLiveStream source={source} />;
+export default function LiveStream({
+    source,
+    onSelectAggregate,
+}: {
+    source?: string | null;
+    onSelectAggregate?: (aggregateId: string) => void;
+}) {
+    return <SourceAwareLiveStream source={source} onSelectAggregate={onSelectAggregate} />;
 }
 
 type LiveStreamMessage = StoredEvent | LiveStreamUnavailableMessage;
@@ -55,7 +61,13 @@ function buildSocketPath(source?: string | null) {
     return `/ws/live?source=${encodeURIComponent(source)}`;
 }
 
-function SourceAwareLiveStream({ source }: { source?: string | null }) {
+function SourceAwareLiveStream({
+    source,
+    onSelectAggregate,
+}: {
+    source?: string | null;
+    onSelectAggregate?: (aggregateId: string) => void;
+}) {
     const demo = isDemoMode();
     const [events, setEvents] = useState<StoredEvent[]>(() => (demo ? demoLiveStreamSeed() : []));
     const [paused, setPaused] = useState(false);
@@ -154,7 +166,17 @@ function SourceAwareLiveStream({ source }: { source?: string | null }) {
                         <span className="event-icon">{eventIcon(e.eventType)}</span>
                         <span className="event-time">{parseEventTimestamp(e.timestamp).toLocaleTimeString()}</span>
                         <span className={`event-type ${typeClass(e.eventType)}`}>{e.eventType}</span>
-                        <span className="event-agg">{e.aggregateId}</span>
+                        {onSelectAggregate ? (
+                            <button
+                                type="button"
+                                className="event-agg event-agg-button"
+                                onClick={() => onSelectAggregate(e.aggregateId)}
+                            >
+                                {e.aggregateId}
+                            </button>
+                        ) : (
+                            <span className="event-agg">{e.aggregateId}</span>
+                        )}
                     </div>
                 ))}
             </div>

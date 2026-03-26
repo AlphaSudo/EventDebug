@@ -4,6 +4,7 @@ import type {
     BisectResult,
     DatasourceHealth,
     DatasourceSummary,
+    EventStatistics,
     PluginSummary,
     ReplayResult,
     StateTransition,
@@ -14,6 +15,7 @@ import {
     demoAnomalies,
     demoBisect,
     demoHealth,
+    demoStatistics,
     demoReplayTo,
     demoSearchAggregates,
     demoTimeline,
@@ -44,6 +46,8 @@ export type {
     BisectResult,
     DatasourceHealth,
     DatasourceSummary,
+    DiffPatch,
+    EventStatistics,
     FieldChange,
     LiveStreamUnavailableMessage,
     PluginSummary,
@@ -90,9 +94,7 @@ export const getTimeline = async (id: string, limit = 500, offset = 0, source?: 
         `/aggregates/${id}/timeline?limit=${limit}&offset=${offset}&fields=${fields}`,
         source
     );
-    return api
-        .get<{ events: StoredEvent[]; totalEvents: number }>(path)
-        .then(r => r.data);
+    return api.get<{ events: StoredEvent[]; totalEvents: number }>(path).then(r => r.data);
 };
 
 export const getTransitions = async (id: string, source?: string | null) => {
@@ -100,9 +102,7 @@ export const getTransitions = async (id: string, source?: string | null) => {
         await delay(50);
         return demoTransitions(id);
     }
-    return api
-        .get<StateTransition[]>(withOptionalSource(`/aggregates/${id}/transitions`, source))
-        .then(r => r.data);
+    return api.get<StateTransition[]>(withOptionalSource(`/aggregates/${id}/transitions`, source)).then(r => r.data);
 };
 
 export const replayTo = async (id: string, seq: number, source?: string | null) => {
@@ -110,9 +110,7 @@ export const replayTo = async (id: string, seq: number, source?: string | null) 
         await delay(40);
         return demoReplayTo(id, seq);
     }
-    return api
-        .get<ReplayResult>(withOptionalSource(`/aggregates/${id}/replay/${seq}`, source))
-        .then(r => r.data);
+    return api.get<ReplayResult>(withOptionalSource(`/aggregates/${id}/replay/${seq}`, source)).then(r => r.data);
 };
 
 export const bisect = async (id: string, expression: string) => {
@@ -120,11 +118,9 @@ export const bisect = async (id: string, expression: string) => {
         await delay(60);
         return demoBisect(expression);
     }
-    return api
-        .post<BisectResult>(`/aggregates/${id}/bisect`, expression, {
-            headers: { 'Content-Type': 'text/plain' },
-        })
-        .then(r => r.data);
+    return api.post<BisectResult>(`/aggregates/${id}/bisect`, expression, {
+        headers: { 'Content-Type': 'text/plain' },
+    }).then(r => r.data);
 };
 
 export const getAnomalies = async (limit = 100, source?: string | null) => {
@@ -143,6 +139,15 @@ export const getRecentEvents = async (limit = 50, source?: string | null) => {
     return api.get<StoredEvent[]>(withOptionalSource(`/events/recent?limit=${limit}`, source)).then(r => r.data);
 };
 
+export const getStatistics = async (source?: string | null, bucketHours = 1, maxBuckets = 24) => {
+    if (isDemoMode()) {
+        await delay(30);
+        return demoStatistics(bucketHours, maxBuckets);
+    }
+    const path = withOptionalSource(`/v1/statistics?bucketHours=${bucketHours}&maxBuckets=${maxBuckets}`, source);
+    return api.get<EventStatistics>(path).then(r => r.data);
+};
+
 export const getHealth = async () => {
     if (isDemoMode()) {
         await delay(20);
@@ -151,11 +156,60 @@ export const getHealth = async () => {
     return api.get('/health').then(r => r.data);
 };
 
-export const getDatasources = async () => api.get<DatasourceSummary[]>('/v1/datasources').then(r => r.data);
+export const getDatasources = async () => {
+    if (isDemoMode()) {
+        await delay(20);
+        return [{
+            id: 'demo-primary',
+            displayName: 'Demo Primary',
+            status: 'ready',
+            healthMessage: 'Frontend demo datasource',
+            capabilities: ['timeline', 'replay', 'statistics'],
+        }];
+    }
+    return api.get<DatasourceSummary[]>('/v1/datasources').then(r => r.data);
+};
 
-export const getDatasourceHealth = async (id: string) =>
-    api.get<DatasourceHealth>(`/v1/datasources/${encodeURIComponent(id)}/health`).then(r => r.data);
+export const getDatasourceHealth = async (id: string) => {
+    if (isDemoMode()) {
+        await delay(20);
+        return {
+            id,
+            displayName: 'Demo Primary',
+            status: 'ready',
+            health: {
+                state: 'up',
+                message: 'Frontend demo datasource',
+            },
+            lastHealthCheck: new Date().toISOString(),
+            failureReason: '',
+        };
+    }
+    return api.get<DatasourceHealth>(`/v1/datasources/${encodeURIComponent(id)}/health`).then(r => r.data);
+};
 
-export const getPlugins = async () => api.get<PluginSummary[]>('/v1/plugins').then(r => r.data);
+export const getPlugins = async () => {
+    if (isDemoMode()) {
+        await delay(20);
+        return [{
+            instanceId: 'demo-source',
+            typeId: 'demo',
+            displayName: 'Demo Source Plugin',
+            pluginType: 'EVENT_SOURCE',
+            lifecycle: 'ready',
+            health: {
+                state: 'up',
+                message: 'Frontend demo plugin',
+            },
+            lastHealthCheck: new Date().toISOString(),
+            failureReason: null,
+        }];
+    }
+    return api.get<PluginSummary[]>('/v1/plugins').then(r => r.data);
+};
 
 export { DEMO_AGGREGATE_ID } from '../demo/demoData';
+
+
+
+

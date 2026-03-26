@@ -8,6 +8,8 @@ import io.eventlens.core.exception.QueryTimeoutException;
 import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.spi.EventStoreReader;
 import io.eventlens.mysql.MySqlSchemaDetector.DetectedSchema;
+import io.eventlens.spi.EventStatistics;
+import io.eventlens.spi.EventStatisticsQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,43 +58,55 @@ public class MySqlEventStoreReader implements EventStoreReader, AutoCloseable {
                 : detector.detect(dataSource, overrides);
     }
 
-    @Override public List<StoredEvent> getEvents(String aggregateId) { return getEvents(aggregateId, Integer.MAX_VALUE, 0); }
+    @Override
+    public List<StoredEvent> getEvents(String aggregateId) {
+        return getEvents(aggregateId, Integer.MAX_VALUE, 0);
+    }
 
     @Override
     public List<StoredEvent> getEvents(String aggregateId, int limit, int offset) {
-        String sql = "SELECT * FROM %s WHERE %s = ? ORDER BY %s ASC LIMIT ? OFFSET ?".formatted(q(schema.tableName()), q(schema.aggregateIdColumn()), q(schema.sequenceColumn()));
+        String sql = "SELECT * FROM %s WHERE %s = ? ORDER BY %s ASC LIMIT ? OFFSET ?"
+                .formatted(q(schema.tableName()), q(schema.aggregateIdColumn()), q(schema.sequenceColumn()));
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setQueryTimeout(queryTimeoutSeconds);
             ps.setString(1, aggregateId);
             ps.setInt(2, limit);
             ps.setInt(3, offset);
             return mapResults(ps.executeQuery());
-        } catch (SQLException e) { throw mapException("Failed to read events for aggregate: " + aggregateId, e); }
+        } catch (SQLException e) {
+            throw mapException("Failed to read events for aggregate: " + aggregateId, e);
+        }
     }
 
     @Override
     public List<StoredEvent> getEventsAfterSequence(String aggregateId, long afterSequence, int limit) {
         String seqCol = q(schema.sequenceColumn());
-        String sql = "SELECT * FROM %s WHERE %s = ? AND %s > ? ORDER BY %s ASC LIMIT ?".formatted(q(schema.tableName()), q(schema.aggregateIdColumn()), seqCol, seqCol);
+        String sql = "SELECT * FROM %s WHERE %s = ? AND %s > ? ORDER BY %s ASC LIMIT ?"
+                .formatted(q(schema.tableName()), q(schema.aggregateIdColumn()), seqCol, seqCol);
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setQueryTimeout(queryTimeoutSeconds);
             ps.setString(1, aggregateId);
             ps.setLong(2, afterSequence);
             ps.setInt(3, limit);
             return mapResults(ps.executeQuery());
-        } catch (SQLException e) { throw mapException("Failed to read events after sequence " + afterSequence, e); }
+        } catch (SQLException e) {
+            throw mapException("Failed to read events after sequence " + afterSequence, e);
+        }
     }
 
     @Override
     public List<StoredEvent> getEventsUpTo(String aggregateId, long maxSequence) {
         String seqCol = q(schema.sequenceColumn());
-        String sql = "SELECT * FROM %s WHERE %s = ? AND %s <= ? ORDER BY %s ASC".formatted(q(schema.tableName()), q(schema.aggregateIdColumn()), seqCol, seqCol);
+        String sql = "SELECT * FROM %s WHERE %s = ? AND %s <= ? ORDER BY %s ASC"
+                .formatted(q(schema.tableName()), q(schema.aggregateIdColumn()), seqCol, seqCol);
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setQueryTimeout(queryTimeoutSeconds);
             ps.setString(1, aggregateId);
             ps.setLong(2, maxSequence);
             return mapResults(ps.executeQuery());
-        } catch (SQLException e) { throw mapException("Failed to read events up to sequence " + maxSequence, e); }
+        } catch (SQLException e) {
+            throw mapException("Failed to read events up to sequence " + maxSequence, e);
+        }
     }
 
     @Override
@@ -100,21 +114,33 @@ public class MySqlEventStoreReader implements EventStoreReader, AutoCloseable {
         String aggCol = q(schema.aggregateIdColumn());
         final String sql;
         if (schema.aggregateTypeColumn() != null) {
-            sql = "SELECT DISTINCT %s FROM %s WHERE %s = ? ORDER BY %s LIMIT ? OFFSET ?".formatted(aggCol, q(schema.tableName()), q(schema.aggregateTypeColumn()), aggCol);
+            sql = "SELECT DISTINCT %s FROM %s WHERE %s = ? ORDER BY %s LIMIT ? OFFSET ?"
+                    .formatted(aggCol, q(schema.tableName()), q(schema.aggregateTypeColumn()), aggCol);
         } else {
-            sql = "SELECT DISTINCT %s FROM %s ORDER BY %s LIMIT ? OFFSET ?".formatted(aggCol, q(schema.tableName()), aggCol);
+            sql = "SELECT DISTINCT %s FROM %s ORDER BY %s LIMIT ? OFFSET ?"
+                    .formatted(aggCol, q(schema.tableName()), aggCol);
         }
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setQueryTimeout(queryTimeoutSeconds);
-            if (schema.aggregateTypeColumn() != null) { ps.setString(1, aggregateType); ps.setInt(2, limit); ps.setInt(3, offset); }
-            else { ps.setInt(1, limit); ps.setInt(2, offset); }
+            if (schema.aggregateTypeColumn() != null) {
+                ps.setString(1, aggregateType);
+                ps.setInt(2, limit);
+                ps.setInt(3, offset);
+            } else {
+                ps.setInt(1, limit);
+                ps.setInt(2, offset);
+            }
             return extractFirstColumn(ps.executeQuery());
-        } catch (SQLException e) { throw mapException("Failed to find aggregate IDs for type: " + aggregateType, e); }
+        } catch (SQLException e) {
+            throw mapException("Failed to find aggregate IDs for type: " + aggregateType, e);
+        }
     }
 
     @Override
     public List<StoredEvent> getRecentEvents(int limit) {
-        String orderCol = schema.globalPositionColumn() != null ? schema.globalPositionColumn() : schema.timestampColumn() != null ? schema.timestampColumn() : schema.eventIdColumn();
+        String orderCol = schema.globalPositionColumn() != null
+                ? schema.globalPositionColumn()
+                : schema.timestampColumn() != null ? schema.timestampColumn() : schema.eventIdColumn();
         String sql = "SELECT * FROM %s ORDER BY %s DESC LIMIT ?".formatted(q(schema.tableName()), q(orderCol));
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setQueryTimeout(queryTimeoutSeconds);
@@ -122,7 +148,9 @@ public class MySqlEventStoreReader implements EventStoreReader, AutoCloseable {
             List<StoredEvent> results = mapResults(ps.executeQuery());
             Collections.reverse(results);
             return results;
-        } catch (SQLException e) { throw mapException("Failed to read recent events", e); }
+        } catch (SQLException e) {
+            throw mapException("Failed to read recent events", e);
+        }
     }
 
     @Override
@@ -135,7 +163,9 @@ public class MySqlEventStoreReader implements EventStoreReader, AutoCloseable {
             ps.setLong(1, globalPosition);
             ps.setInt(2, limit);
             return mapResults(ps.executeQuery());
-        } catch (SQLException e) { throw mapException("Failed to poll events after position " + globalPosition, e); }
+        } catch (SQLException e) {
+            throw mapException("Failed to poll events after position " + globalPosition, e);
+        }
     }
 
     @Override
@@ -146,33 +176,66 @@ public class MySqlEventStoreReader implements EventStoreReader, AutoCloseable {
             ps.setString(1, aggregateId);
             ResultSet rs = ps.executeQuery();
             return rs.next() ? rs.getLong(1) : 0;
-        } catch (SQLException e) { throw mapException("Failed to count events for: " + aggregateId, e); }
+        } catch (SQLException e) {
+            throw mapException("Failed to count events for: " + aggregateId, e);
+        }
     }
 
     @Override
     public List<String> getAggregateTypes() {
-        if (schema.aggregateTypeColumn() == null) return List.of();
+        if (schema.aggregateTypeColumn() == null) {
+            return List.of();
+        }
         String typeCol = q(schema.aggregateTypeColumn());
         String sql = "SELECT DISTINCT %s FROM %s ORDER BY %s".formatted(typeCol, q(schema.tableName()), typeCol);
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setQueryTimeout(queryTimeoutSeconds);
             return extractFirstColumn(ps.executeQuery());
-        } catch (SQLException e) { throw mapException("Failed to get aggregate types", e); }
+        } catch (SQLException e) {
+            throw mapException("Failed to get aggregate types", e);
+        }
     }
 
     @Override
     public List<String> searchAggregates(String query, int limit) {
         String aggCol = q(schema.aggregateIdColumn());
-        String sql = "SELECT DISTINCT %s FROM %s WHERE LOWER(%s) LIKE LOWER(?) ORDER BY %s LIMIT ?".formatted(aggCol, q(schema.tableName()), aggCol, aggCol);
+        String sql = "SELECT DISTINCT %s FROM %s WHERE LOWER(%s) LIKE LOWER(?) ORDER BY %s LIMIT ?"
+                .formatted(aggCol, q(schema.tableName()), aggCol, aggCol);
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setQueryTimeout(queryTimeoutSeconds);
             ps.setString(1, "%" + query + "%");
             ps.setInt(2, limit);
             return extractFirstColumn(ps.executeQuery());
-        } catch (SQLException e) { throw mapException("Failed to search aggregates", e); }
+        } catch (SQLException e) {
+            throw mapException("Failed to search aggregates", e);
+        }
     }
 
-    @Override public void close() { if (dataSource != null && !dataSource.isClosed()) dataSource.close(); }
+    public EventStatistics statistics(EventStatisticsQuery query) {
+        if (schema.timestampColumn() == null) {
+            return EventStatistics.unavailable("Statistics require a timestamp column");
+        }
+        try (Connection conn = dataSource.getConnection()) {
+            long totalEvents = singleLong(conn, "SELECT COUNT(*) FROM %s".formatted(q(schema.tableName())));
+            long distinctAggregates = singleLong(conn,
+                    "SELECT COUNT(DISTINCT %s) FROM %s".formatted(q(schema.aggregateIdColumn()), q(schema.tableName())));
+            List<EventStatistics.TypeCount> eventTypes = typeCounts(conn, schema.eventTypeColumn(), 10);
+            List<EventStatistics.TypeCount> aggregateTypes = schema.aggregateTypeColumn() == null
+                    ? List.of()
+                    : typeCounts(conn, schema.aggregateTypeColumn(), 10);
+            List<EventStatistics.ThroughputPoint> throughput = throughput(conn, query);
+            return new EventStatistics(totalEvents, distinctAggregates, eventTypes, aggregateTypes, throughput, true, null);
+        } catch (SQLException e) {
+            throw mapException("Failed to calculate statistics", e);
+        }
+    }
+
+    @Override
+    public void close() {
+        if (dataSource != null && !dataSource.isClosed()) {
+            dataSource.close();
+        }
+    }
 
     private RuntimeException mapException(String message, SQLException e) {
         if ("HY000".equals(e.getSQLState()) && e.getMessage() != null && e.getMessage().contains("maximum statement execution time")) {
@@ -181,7 +244,9 @@ public class MySqlEventStoreReader implements EventStoreReader, AutoCloseable {
         return new EventStoreException(message, e);
     }
 
-    private static String q(String identifier) { return "`" + identifier.replace("`", "``") + "`"; }
+    private static String q(String identifier) {
+        return "`" + identifier.replace("`", "``") + "`";
+    }
 
     private List<StoredEvent> mapResults(ResultSet rs) throws SQLException {
         List<StoredEvent> events = new ArrayList<>();
@@ -201,25 +266,95 @@ public class MySqlEventStoreReader implements EventStoreReader, AutoCloseable {
     }
 
     private String safeGetString(ResultSet rs, String columnName, String fallback) {
-        if (columnName == null) return fallback;
-        try { String value = rs.getString(columnName); return value != null ? value : fallback; }
-        catch (SQLException e) { log.debug("Could not read optional column '{}': {}", columnName, e.getMessage()); return fallback; }
+        if (columnName == null) {
+            return fallback;
+        }
+        try {
+            String value = rs.getString(columnName);
+            return value != null ? value : fallback;
+        } catch (SQLException e) {
+            log.debug("Could not read optional column '{}': {}", columnName, e.getMessage());
+            return fallback;
+        }
     }
 
     private long safeGetLong(ResultSet rs, String columnName) {
-        try { return rs.getLong(columnName); }
-        catch (SQLException e) { try { return Long.parseLong(Objects.toString(rs.getObject(columnName), "0")); } catch (Exception ignored) { return 0; } }
+        try {
+            return rs.getLong(columnName);
+        } catch (SQLException e) {
+            try {
+                return Long.parseLong(Objects.toString(rs.getObject(columnName), "0"));
+            } catch (Exception ignored) {
+                return 0;
+            }
+        }
     }
 
     private Instant safeGetInstant(ResultSet rs, String columnName) {
-        if (columnName == null) return Instant.EPOCH;
-        try { Timestamp ts = rs.getTimestamp(columnName); return ts != null ? ts.toInstant() : Instant.EPOCH; }
-        catch (SQLException e) { return Instant.EPOCH; }
+        if (columnName == null) {
+            return Instant.EPOCH;
+        }
+        try {
+            Timestamp ts = rs.getTimestamp(columnName);
+            return ts != null ? ts.toInstant() : Instant.EPOCH;
+        } catch (SQLException e) {
+            return Instant.EPOCH;
+        }
+    }
+
+    private long singleLong(Connection conn, String sql) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
+            ResultSet rs = ps.executeQuery();
+            return rs.next() ? rs.getLong(1) : 0;
+        }
+    }
+
+    private List<EventStatistics.TypeCount> typeCounts(Connection conn, String column, int limit) throws SQLException {
+        String col = q(column);
+        String sql = "SELECT %s, COUNT(*) FROM %s GROUP BY %s ORDER BY COUNT(*) DESC, %s ASC LIMIT ?"
+                .formatted(col, q(schema.tableName()), col, col);
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
+            ps.setInt(1, limit);
+            ResultSet rs = ps.executeQuery();
+            List<EventStatistics.TypeCount> counts = new ArrayList<>();
+            while (rs.next()) {
+                counts.add(new EventStatistics.TypeCount(Objects.toString(rs.getObject(1), "unknown"), rs.getLong(2)));
+            }
+            return counts;
+        }
+    }
+
+    private List<EventStatistics.ThroughputPoint> throughput(Connection conn, EventStatisticsQuery query) throws SQLException {
+        String ts = q(schema.timestampColumn());
+        String sql = """
+                SELECT DATE_FORMAT(%s, '%%Y-%%m-%%dT%%H:00:00Z') AS bucket,
+                       COUNT(*) AS bucket_count
+                FROM %s
+                WHERE %s >= UTC_TIMESTAMP() - INTERVAL ? HOUR
+                GROUP BY DATE_FORMAT(%s, '%%Y-%%m-%%dT%%H:00:00Z')
+                ORDER BY bucket ASC
+                LIMIT ?
+                """.formatted(ts, q(schema.tableName()), ts, ts);
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(queryTimeoutSeconds);
+            ps.setInt(1, query.bucketHours() * query.maxBuckets());
+            ps.setInt(2, query.maxBuckets());
+            ResultSet rs = ps.executeQuery();
+            List<EventStatistics.ThroughputPoint> points = new ArrayList<>();
+            while (rs.next()) {
+                points.add(new EventStatistics.ThroughputPoint(rs.getString(1), rs.getLong(2)));
+            }
+            return points;
+        }
     }
 
     private List<String> extractFirstColumn(ResultSet rs) throws SQLException {
         List<String> result = new ArrayList<>();
-        while (rs.next()) result.add(Objects.toString(rs.getObject(1), ""));
+        while (rs.next()) {
+            result.add(Objects.toString(rs.getObject(1), ""));
+        }
         return result;
     }
 }

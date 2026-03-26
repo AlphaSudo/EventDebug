@@ -32,10 +32,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -79,7 +81,10 @@ class SourceAwarePanelsIntegrationTest {
         startServer(primary, legacy, pgStream, Map.of("pg-primary", "pg-stream", "mysql-alt", ""));
 
         CompletableFuture<String> liveMessage = new CompletableFuture<>();
-        WebSocket liveSocket = openSocket("/ws/live?source=pg-primary", liveMessage);
+        WebSocket liveSocket = openSocket("/ws/live?source=pg-primary", new MatchingMessageListener(
+                liveMessage,
+                payload -> payload.contains("\"eventType\":\"LiveArrived\"")));
+        waitForSubscriber(pgStream);
         pgStream.emit(new Event(
                 "evt-live",
                 "PG-AGG",
@@ -96,13 +101,61 @@ class SourceAwarePanelsIntegrationTest {
         assertThat(streamed).contains("\"eventType\":\"LiveArrived\"");
 
         CompletableFuture<String> placeholderMessage = new CompletableFuture<>();
-        WebSocket noStreamSocket = openSocket("/ws/live?source=mysql-alt", placeholderMessage);
+        WebSocket noStreamSocket = openSocket("/ws/live?source=mysql-alt", new MatchingMessageListener(
+                placeholderMessage,
+                payload -> payload.contains("\"type\":\"NO_LIVE_STREAM\"")));
         String placeholder = placeholderMessage.get(5, TimeUnit.SECONDS);
         assertThat(placeholder).contains("\"type\":\"NO_LIVE_STREAM\"");
         assertThat(placeholder).contains("\"source\":\"mysql-alt\"");
 
         liveSocket.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();
         noStreamSocket.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();
+    }
+
+    @Test
+    void websocketBurstKeepsLatestBufferedEventsForSlowClients() throws Exception {
+        TestEventSourcePlugin primary = new TestEventSourcePlugin("pg-primary", List.of());
+        TestEventSourcePlugin legacy = new TestEventSourcePlugin("mysql-alt", List.of());
+        TestStreamAdapterPlugin pgStream = new TestStreamAdapterPlugin();
+        startServer(primary, legacy, pgStream, Map.of("pg-primary", "pg-stream"));
+
+        CompletableFuture<List<String>> burstMessages = new CompletableFuture<>();
+        WebSocket burstSocket = openSocket("/ws/live?source=pg-primary", new CollectingListener(
+                burstMessages,
+                payloads -> payloads.stream().anyMatch(payload -> payload.contains("\"sequenceNumber\":260"))));
+
+        waitForSubscriber(pgStream);
+
+        for (int sequence = 1; sequence <= 260; sequence++) {
+            pgStream.emit(new Event(
+                    "evt-live-" + sequence,
+                    "PG-AGG",
+                    "BankAccount",
+                    sequence,
+                    "LiveArrived",
+                    JSON.readTree("{\"sequence\":" + sequence + "}"),
+                    JSON.readTree("{\"source\":\"pg\"}"),
+                    Instant.parse("2026-03-24T12:00:00Z").plusSeconds(sequence),
+                    sequence
+            ));
+        }
+
+        List<String> messages = burstMessages.get(10, TimeUnit.SECONDS);
+        List<Long> sequences = messages.stream()
+                .map(payload -> {
+                    try {
+                        return JSON.readTree(payload).path("sequenceNumber").asLong();
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .toList();
+
+        assertThat(sequences).isNotEmpty();
+        assertThat(sequences.get(sequences.size() - 1)).isEqualTo(260);
+        assertThat(sequences).allMatch(sequence -> sequence > 0 && sequence <= 260);
+
+        burstSocket.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();
     }
 
     private void startServer(
@@ -162,8 +215,23 @@ class SourceAwarePanelsIntegrationTest {
                 .newWebSocketBuilder()
                 .buildAsync(
                         URI.create("ws://localhost:" + server.getApp().port() + pathAndQuery),
-                        new FirstMessageListener(firstMessage))
+                        new MatchingMessageListener(firstMessage, payload -> true))
                 .join();
+    }
+
+    private WebSocket openSocket(String pathAndQuery, WebSocket.Listener listener) {
+        return HttpClient.newHttpClient()
+                .newWebSocketBuilder()
+                .buildAsync(URI.create("ws://localhost:" + server.getApp().port() + pathAndQuery), listener)
+                .join();
+    }
+
+    private void waitForSubscriber(TestStreamAdapterPlugin plugin) throws Exception {
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (!plugin.hasSubscriber() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25);
+        }
+        assertThat(plugin.hasSubscriber()).isTrue();
     }
 
     private static int freePort() throws Exception {
@@ -328,6 +396,10 @@ class SourceAwarePanelsIntegrationTest {
             return HealthStatus.up();
         }
 
+        private boolean hasSubscriber() {
+            return listener.get() != null;
+        }
+
         private void emit(Event event) {
             var activeListener = listener.get();
             if (activeListener != null) {
@@ -336,12 +408,14 @@ class SourceAwarePanelsIntegrationTest {
         }
     }
 
-    private static final class FirstMessageListener implements WebSocket.Listener {
-        private final CompletableFuture<String> firstMessage;
+    private static final class MatchingMessageListener implements WebSocket.Listener {
+        private final CompletableFuture<String> matchingMessage;
+        private final Predicate<String> predicate;
         private final StringBuilder text = new StringBuilder();
 
-        private FirstMessageListener(CompletableFuture<String> firstMessage) {
-            this.firstMessage = firstMessage;
+        private MatchingMessageListener(CompletableFuture<String> matchingMessage, Predicate<String> predicate) {
+            this.matchingMessage = matchingMessage;
+            this.predicate = predicate;
         }
 
         @Override
@@ -353,8 +427,44 @@ class SourceAwarePanelsIntegrationTest {
         @Override
         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
             text.append(data);
-            if (last && !firstMessage.isDone()) {
-                firstMessage.complete(text.toString());
+            if (last) {
+                String payload = text.toString();
+                text.setLength(0);
+                if (!matchingMessage.isDone() && predicate.test(payload)) {
+                    matchingMessage.complete(payload);
+                }
+            }
+            webSocket.request(1);
+            return CompletableFuture.completedFuture(null);
+        }
+    }
+
+    private static final class CollectingListener implements WebSocket.Listener {
+        private final CompletableFuture<List<String>> messagesFuture;
+        private final Predicate<List<String>> completionPredicate;
+        private final List<String> messages = new CopyOnWriteArrayList<>();
+        private final StringBuilder text = new StringBuilder();
+
+        private CollectingListener(CompletableFuture<List<String>> messagesFuture, Predicate<List<String>> completionPredicate) {
+            this.messagesFuture = messagesFuture;
+            this.completionPredicate = completionPredicate;
+        }
+
+        @Override
+        public void onOpen(WebSocket webSocket) {
+            webSocket.request(1);
+            WebSocket.Listener.super.onOpen(webSocket);
+        }
+
+        @Override
+        public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+            text.append(data);
+            if (last) {
+                messages.add(text.toString());
+                text.setLength(0);
+                if (!messagesFuture.isDone() && completionPredicate.test(List.copyOf(messages))) {
+                    messagesFuture.complete(List.copyOf(messages));
+                }
             }
             webSocket.request(1);
             return CompletableFuture.completedFuture(null);

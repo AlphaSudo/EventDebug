@@ -5,6 +5,7 @@ import { searchAggregates } from '../api/client';
 interface Props {
     onSelect: (id: string) => void;
     source?: string | null;
+    selectedValue?: string | null;
 }
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -16,7 +17,7 @@ function useDebounce<T>(value: T, delay: number): T {
     return debounced;
 }
 
-export default function SearchBar({ onSelect, source }: Props) {
+export default function SearchBar({ onSelect, source, selectedValue }: Props) {
     const [query, setQuery] = useState('');
     const [open, setOpen] = useState(false);
     const wrapperRef = useRef<HTMLDivElement>(null);
@@ -28,6 +29,10 @@ export default function SearchBar({ onSelect, source }: Props) {
         enabled: debouncedQuery.length >= 2,
         staleTime: 5_000,
     });
+
+    useEffect(() => {
+        setQuery(selectedValue ?? '');
+    }, [selectedValue]);
 
     useEffect(() => {
         const handler = (e: MouseEvent) => {
@@ -45,7 +50,9 @@ export default function SearchBar({ onSelect, source }: Props) {
         inputRef.current?.select();
     }, []);
     useEffect(() => {
-        document.getElementById('aggregate-search')?.addEventListener('focus', focus as never);
+        const input = document.getElementById('aggregate-search');
+        input?.addEventListener('focus', focus as never);
+        return () => input?.removeEventListener('focus', focus as never);
     }, [focus]);
 
     const handleSelect = (id: string) => {
@@ -73,9 +80,10 @@ export default function SearchBar({ onSelect, source }: Props) {
                     if (e.key === 'Escape') setOpen(false);
                 }}
                 autoComplete="off"
+                aria-autocomplete="list"
             />
             {open && results.length > 0 && (
-                <div className="search-results" role="listbox">
+                <div className="search-results" role="listbox" id="aggregate-search-results">
                     {results.map(id => (
                         <button
                             key={id}

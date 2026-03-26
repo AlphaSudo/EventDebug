@@ -1,137 +1,120 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useReplay } from '../hooks/useReplay';
+import { useJsonDiffWorker } from '../hooks/useJsonDiffWorker';
 import StateDiff from './StateDiff';
 import JsonTreeView from './JsonTreeView';
 
 interface Props {
     aggregateId: string;
     sequence: number;
+    compareSequence?: number | null;
     activeTab?: TabId;
     onTabChange?: (tab: TabId) => void;
+    active?: boolean;
+    onActivate?: () => void;
     source?: string | null;
 }
 
 export type TabId = 'changes' | 'before-after' | 'raw';
 
-const TABS: { id: TabId; label: string; emoji: string }[] = [
-    { id: 'changes', label: 'Changes', emoji: '±' },
-    { id: 'before-after', label: 'Before / After', emoji: '⇄' },
-    { id: 'raw', label: 'Raw JSON', emoji: '{ }' },
+const TABS: { id: TabId; label: string }[] = [
+    { id: 'changes', label: 'Changes' },
+    { id: 'before-after', label: 'Before / After' },
+    { id: 'raw', label: 'Raw JSON' },
 ];
 
-export default function StateViewer({ aggregateId, sequence, activeTab: externalTab, onTabChange, source }: Props) {
-    const { data: transitions, isLoading } = useReplay(aggregateId, source);
+export default function StateViewer({ aggregateId, sequence, compareSequence, activeTab: externalTab, onTabChange, active = false, onActivate, source }: Props) {
+    const { data: transitions = [], isLoading } = useReplay(aggregateId, source);
     const [localTab, setLocalTab] = useState<TabId>('changes');
 
     const activeTab = externalTab ?? localTab;
-    const handleTab = (t: TabId) => {
-        setLocalTab(t);
-        onTabChange?.(t);
+    const handleTab = (tab: TabId) => {
+        setLocalTab(tab);
+        onTabChange?.(tab);
     };
 
+    const primary = transitions.find(t => t.event.sequenceNumber === sequence) ?? null;
+    const compare = compareSequence != null
+        ? transitions.find(t => t.event.sequenceNumber === compareSequence) ?? null
+        : null;
+    const compareMode = primary != null && compare != null && primary.event.sequenceNumber !== compare.event.sequenceNumber;
+    const leftState = compareMode ? compare.stateAfter : primary?.stateBefore;
+    const rightState = primary?.stateAfter;
+    const { patches, loading: diffLoading, durationMs } = useJsonDiffWorker(leftState, rightState, compareMode && !!leftState && !!rightState);
+
+    const changedKeys = useMemo(() => {
+        if (compareMode) {
+            return new Set(patches.map(patch => patch.path.replace(/^\$\./, '').split('.')[0]));
+        }
+        return new Set(Object.keys(primary?.diff ?? {}));
+    }, [compareMode, patches, primary?.diff]);
+
     if (isLoading) {
-        return (
-            <div className="card">
-                <div className="card-title">🔬 State at Event</div>
-                <div className="skeleton" style={{ height: 120 }} />
-            </div>
-        );
+        return <div className="card"><div className="card-title">State</div><div className="skeleton" style={{ height: 160 }} /></div>;
+    }
+    if (!primary) {
+        return null;
     }
 
-    const transition = transitions?.find(t => t.event.sequenceNumber === sequence);
-    if (!transition) return null;
-
-    const { event, stateBefore, stateAfter, diff } = transition;
-
-    const diffEntries = Object.entries(diff);
-    const hasDiff = diffEntries.length > 0;
-    const changedKeys = new Set(diffEntries.map(([k]) => k));
-
     return (
-        <div className="card">
+        <section className="card" role="region" aria-label="State viewer" aria-current={active ? 'page' : undefined} onFocus={onActivate}>
             <div className="card-title">
-                🔬 State at Event #{event.sequenceNumber}
-                <span
-                    style={{
-                        color: 'var(--accent-blue)',
-                        background: 'var(--accent-blue-dim)',
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                    }}
-                >
-                    {event.eventType}
-                </span>
-                {hasDiff && (
-                    <span className="diff-count-badge">
-                        {diffEntries.length} {diffEntries.length === 1 ? 'change' : 'changes'}
-                    </span>
-                )}
+                State at Event #{primary.event.sequenceNumber}
+                <span className="diff-count-badge">{primary.event.eventType}</span>
+                {compareMode && <span className="diff-count-badge">Compared with #{compare?.event.sequenceNumber}</span>}
+                {compareMode && !diffLoading && <span className="diff-count-badge">Worker {durationMs.toFixed(1)}ms</span>}
             </div>
-
-            {/* Tab strip */}
             <div className="state-tabs" role="tablist">
-                {TABS.map(t => (
+                {TABS.map(tab => (
                     <button
-                        key={t.id}
+                        key={tab.id}
                         type="button"
                         role="tab"
-                        aria-selected={activeTab === t.id}
-                        className={`state-tab ${activeTab === t.id ? 'active' : ''}`}
-                        onClick={() => handleTab(t.id)}
+                        aria-selected={activeTab === tab.id}
+                        className={`state-tab ${activeTab === tab.id ? 'active' : ''}`}
+                        onClick={() => handleTab(tab.id)}
                     >
-                        <span className="state-tab-emoji" aria-hidden>{t.emoji}</span>
-                        {t.label}
+                        {tab.label}
                     </button>
                 ))}
             </div>
-
-            {/* Tab content */}
             <div className="state-tab-content" role="tabpanel">
-
-                {/* Changes tab — StateDiff */}
                 {activeTab === 'changes' && (
                     <div>
-                        {hasDiff ? (
-                            <StateDiff diff={diff} />
+                        {compareMode ? (
+                            diffLoading ? <div className="skeleton" style={{ height: 120 }} /> : <StateDiff patches={patches} title="Structural diff" />
                         ) : (
-                            <p style={{ color: 'var(--text-muted)', marginTop: 12, fontSize: 13 }}>No field changes at this event.</p>
+                            primary.diff && Object.keys(primary.diff).length > 0
+                                ? <StateDiff diff={primary.diff} />
+                                : <p style={{ color: 'var(--text-muted)', marginTop: 12, fontSize: 13 }}>No field changes at this event.</p>
                         )}
                     </div>
                 )}
-
-                {/* Before / After tab — JSON tree views */}
                 {activeTab === 'before-after' && (
                     <div className="state-grid" style={{ marginTop: 12 }}>
                         <div className="state-panel state-panel-before">
-                            <h4>Before</h4>
-                            <JsonTreeView value={stateBefore} changedKeys={changedKeys} />
+                            <h4>{compareMode ? `Event #${compare?.event.sequenceNumber}` : 'Before'}</h4>
+                            <JsonTreeView value={leftState ?? {}} changedKeys={changedKeys} />
                         </div>
                         <div className="state-panel state-panel-after">
-                            <h4>After</h4>
-                            <JsonTreeView value={stateAfter} changedKeys={changedKeys} />
+                            <h4>{compareMode ? `Event #${primary.event.sequenceNumber}` : 'After'}</h4>
+                            <JsonTreeView value={rightState ?? {}} changedKeys={changedKeys} />
                         </div>
                     </div>
                 )}
-
-                {/* Raw JSON tab */}
                 {activeTab === 'raw' && (
                     <div style={{ marginTop: 12 }}>
                         <div className="json-block" style={{ maxHeight: 340 }}>
-                            {JSON.stringify(event, null, 2)}
+                            {JSON.stringify(compareMode ? {
+                                leftEvent: compare?.event,
+                                rightEvent: primary.event,
+                                leftState,
+                                rightState,
+                            } : primary.event, null, 2)}
                         </div>
-                        <button
-                            className="copy-btn"
-                            type="button"
-                            onClick={() => navigator.clipboard.writeText(JSON.stringify(event, null, 2))}
-                        >
-                            📋 Copy Event JSON
-                        </button>
                     </div>
                 )}
             </div>
-        </div>
+        </section>
     );
 }
-
-

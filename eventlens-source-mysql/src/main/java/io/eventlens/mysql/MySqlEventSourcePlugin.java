@@ -12,6 +12,8 @@ import io.eventlens.spi.EventQuery;
 import io.eventlens.spi.EventQueryResult;
 import io.eventlens.spi.EventSourceCapabilities;
 import io.eventlens.spi.EventSourcePlugin;
+import io.eventlens.spi.EventStatistics;
+import io.eventlens.spi.EventStatisticsQuery;
 import io.eventlens.spi.HealthStatus;
 
 import java.util.List;
@@ -23,8 +25,15 @@ public class MySqlEventSourcePlugin implements EventSourcePlugin, EventStoreRead
 
     private volatile MySqlEventStoreReader reader;
 
-    @Override public String typeId() { return "mysql"; }
-    @Override public String displayName() { return "MySQL Event Store"; }
+    @Override
+    public String typeId() {
+        return "mysql";
+    }
+
+    @Override
+    public String displayName() {
+        return "MySQL Event Store";
+    }
 
     @Override
     public void initialize(String instanceId, Map<String, Object> config) {
@@ -38,7 +47,10 @@ public class MySqlEventSourcePlugin implements EventSourcePlugin, EventStoreRead
                 config.get("queryTimeoutSeconds") instanceof Number n ? n.intValue() : 30));
     }
 
-    @Override public EventSourceCapabilities capabilities() { return new EventSourceCapabilities(true, true, true, true, Set.of("aggregate_id", "aggregate_type", "event_type", "timestamp")); }
+    @Override
+    public EventSourceCapabilities capabilities() {
+        return new EventSourceCapabilities(true, true, true, true, Set.of("aggregate_id", "aggregate_type", "event_type", "timestamp"));
+    }
 
     @Override
     public EventQueryResult query(EventQuery query) {
@@ -60,11 +72,28 @@ public class MySqlEventSourcePlugin implements EventSourcePlugin, EventStoreRead
 
     @Override
     public HealthStatus healthCheck() {
-        try { requireReader().getAggregateTypes(); return HealthStatus.up(); }
-        catch (Exception e) { return HealthStatus.down(e.getMessage() != null ? e.getMessage() : "mysql health check failed"); }
+        try {
+            requireReader().getAggregateTypes();
+            return HealthStatus.up();
+        } catch (Exception e) {
+            return HealthStatus.down(e.getMessage() != null ? e.getMessage() : "mysql health check failed");
+        }
     }
 
-    @Override public void close() { MySqlEventStoreReader activeReader = reader; reader = null; if (activeReader != null) activeReader.close(); }
+    @Override
+    public EventStatistics statistics(EventStatisticsQuery query) {
+        return requireReader().statistics(query);
+    }
+
+    @Override
+    public void close() {
+        MySqlEventStoreReader activeReader = reader;
+        reader = null;
+        if (activeReader != null) {
+            activeReader.close();
+        }
+    }
+
     @Override public List<StoredEvent> getEvents(String aggregateId) { return requireReader().getEvents(aggregateId); }
     @Override public List<StoredEvent> getEvents(String aggregateId, int limit, int offset) { return requireReader().getEvents(aggregateId, limit, offset); }
     @Override public List<StoredEvent> getEventsAfterSequence(String aggregateId, long afterSequence, int limit) { return requireReader().getEventsAfterSequence(aggregateId, afterSequence, limit); }

@@ -19,19 +19,27 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * WebSocket live tail - streams events to connected browser clients in
- * real-time.
+ * WebSocket live tail with bounded buffering and batched flushes.
  */
 public class LiveTailWebSocket {
 
     private static final Logger log = LoggerFactory.getLogger(LiveTailWebSocket.class);
     private static final int MAX_CONNECTIONS = 500;
     private static final int BACKFILL_EVENT_COUNT = 100;
+    private static final int MAX_BUFFERED_MESSAGES = 200;
+    private static final int MAX_MESSAGES_PER_FLUSH = 50;
+    private static final long FLUSH_DELAY_MS = 100;
 
     private final Map<String, Set<WsContext>> sessionsBySource = new ConcurrentHashMap<>();
+    private final Map<String, SessionState> sessionStates = new ConcurrentHashMap<>();
     private final Set<String> subscribedSources = ConcurrentHashMap.newKeySet();
     private final ObjectMapper mapper = new ObjectMapper()
             .findAndRegisterModules()
@@ -41,8 +49,13 @@ public class LiveTailWebSocket {
     private final AuditLogger auditLogger;
     private final String defaultSourceId;
     private final Map<String, String> sourceStreamBindings;
-    private final ExecutorService backfillExecutor = java.util.concurrent.Executors.newCachedThreadPool(
+    private final ExecutorService backfillExecutor = Executors.newCachedThreadPool(
             Thread.ofVirtual().name("eventlens-backfill-", 0).factory());
+    private final ScheduledExecutorService flushExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "eventlens-live-flush");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public LiveTailWebSocket(
             SourceRegistry sourceRegistry,
@@ -69,6 +82,7 @@ public class LiveTailWebSocket {
             ctx.attribute("eventlensSourceId", sourceId);
             ctx.enableAutomaticPings();
             sessionsBySource.computeIfAbsent(sourceId, ignored -> ConcurrentHashMap.newKeySet()).add(ctx);
+            sessionStates.put(ctx.sessionId(), new SessionState(ctx));
             EventLensMetrics.setWebsocketConnections(totalSessions());
             log.debug("WebSocket client connected: {} on source {} ({} active)", ctx.sessionId(), sourceId, totalSessions());
 
@@ -91,7 +105,7 @@ public class LiveTailWebSocket {
                 ensureSubscribed(sourceId, streamAdapter.get());
                 backfillExecutor.submit(() -> backfill(ctx, sourceId));
             } else {
-                sendControl(ctx, new ControlMessage("NO_LIVE_STREAM", sourceId));
+                enqueueControl(ctx, new ControlMessage("NO_LIVE_STREAM", sourceId));
             }
         });
 
@@ -104,7 +118,7 @@ public class LiveTailWebSocket {
             Thread.sleep(250);
             var recent = sourceRegistry.resolve(sourceId).reader().getRecentEvents(BACKFILL_EVENT_COUNT);
             for (var event : recent) {
-                if (!trySend(ctx, event)) {
+                if (!enqueue(ctx, event)) {
                     break;
                 }
             }
@@ -127,8 +141,61 @@ public class LiveTailWebSocket {
         if (sessions == null || sessions.isEmpty()) {
             return;
         }
-        sessions.removeIf(session -> !trySend(session, event));
+        sessions.removeIf(session -> !enqueue(session, event));
         EventLensMetrics.setWebsocketConnections(totalSessions());
+    }
+
+    private boolean enqueue(WsContext ctx, Object payload) {
+        SessionState state = sessionStates.get(ctx.sessionId());
+        if (state == null || state.closed.get()) {
+            return false;
+        }
+        try {
+            String json = mapper.writeValueAsString(payload);
+            while (state.queue.size() >= MAX_BUFFERED_MESSAGES) {
+                state.queue.pollFirst();
+                state.droppedCount++;
+            }
+            state.queue.addLast(json);
+            scheduleFlush(state);
+            return true;
+        } catch (Exception e) {
+            log.debug("WebSocket enqueue failed for {}: {}", ctx.sessionId(), e.getMessage());
+            return false;
+        }
+    }
+
+    private void enqueueControl(WsContext ctx, ControlMessage message) {
+        enqueue(ctx, message);
+    }
+
+    private void scheduleFlush(SessionState state) {
+        if (!state.flushScheduled.compareAndSet(false, true)) {
+            return;
+        }
+        flushExecutor.schedule(() -> flush(state), FLUSH_DELAY_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void flush(SessionState state) {
+        state.flushScheduled.set(false);
+        if (state.closed.get()) {
+            return;
+        }
+        int sent = 0;
+        while (sent < MAX_MESSAGES_PER_FLUSH) {
+            String next = state.queue.pollFirst();
+            if (next == null) {
+                break;
+            }
+            if (!trySendRaw(state.ctx, next)) {
+                removeSession(state.ctx);
+                return;
+            }
+            sent++;
+        }
+        if (!state.queue.isEmpty()) {
+            scheduleFlush(state);
+        }
     }
 
     private Optional<StreamAdapterPlugin> streamForSource(String sourceId) {
@@ -173,6 +240,11 @@ public class LiveTailWebSocket {
         } else {
             sessionsBySource.values().forEach(sessions -> sessions.remove(ctx));
         }
+        SessionState state = sessionStates.remove(ctx.sessionId());
+        if (state != null) {
+            state.closed.set(true);
+            state.queue.clear();
+        }
         EventLensMetrics.setWebsocketConnections(totalSessions());
         log.debug("WebSocket session ended: {}", ctx.sessionId());
     }
@@ -181,21 +253,13 @@ public class LiveTailWebSocket {
         return sessionsBySource.values().stream().mapToInt(Set::size).sum();
     }
 
-    private boolean trySend(WsContext ctx, StoredEvent event) {
+    private boolean trySendRaw(WsContext ctx, String json) {
         try {
-            ctx.send(mapper.writeValueAsString(event));
+            ctx.send(json);
             return true;
         } catch (Exception e) {
             log.debug("WebSocket send failed for {}: {}", ctx.sessionId(), e.getMessage());
             return false;
-        }
-    }
-
-    private void sendControl(WsContext ctx, ControlMessage message) {
-        try {
-            ctx.send(mapper.writeValueAsString(message));
-        } catch (Exception e) {
-            log.debug("WebSocket control send failed for {}: {}", ctx.sessionId(), e.getMessage());
         }
     }
 
@@ -223,5 +287,17 @@ public class LiveTailWebSocket {
     }
 
     private record ControlMessage(String type, String source) {
+    }
+
+    private static final class SessionState {
+        private final WsContext ctx;
+        private final ConcurrentLinkedDeque<String> queue = new ConcurrentLinkedDeque<>();
+        private final AtomicBoolean flushScheduled = new AtomicBoolean(false);
+        private final AtomicBoolean closed = new AtomicBoolean(false);
+        private volatile long droppedCount = 0;
+
+        private SessionState(WsContext ctx) {
+            this.ctx = ctx;
+        }
     }
 }

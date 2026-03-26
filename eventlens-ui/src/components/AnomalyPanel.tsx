@@ -4,6 +4,7 @@ import { parseEventTimestamp } from '../utils/time';
 
 interface Props {
     source?: string | null;
+    onSelectAggregate?: (aggregateId: string) => void;
 }
 
 function severityBadgeClass(sev: string): string {
@@ -84,7 +85,7 @@ function GaugeWave({ color }: { color: 'green' | 'cyan' }) {
     );
 }
 
-export default function AnomalyPanel({ source }: Props) {
+export default function AnomalyPanel({ source, onSelectAggregate }: Props) {
     const { data: anomalies, isLoading } = useQuery({
         queryKey: ['anomalies', source ?? 'default'],
         queryFn: () => getAnomalies(100, source),
@@ -152,7 +153,17 @@ export default function AnomalyPanel({ source }: Props) {
                             <div className="anomaly-card-body">
                                 <p className="anomaly-card-meta">
                                     <span className="anomaly-meta-label">Aggregate</span>
-                                    <code className="anomaly-meta-value">{a.aggregateId}</code>
+                                    {onSelectAggregate ? (
+                                        <button
+                                            type="button"
+                                            className="anomaly-aggregate-link"
+                                            onClick={() => onSelectAggregate(a.aggregateId)}
+                                        >
+                                            <code className="anomaly-meta-value">{a.aggregateId}</code>
+                                        </button>
+                                    ) : (
+                                        <code className="anomaly-meta-value">{a.aggregateId}</code>
+                                    )}
                                 </p>
                                 <p className="anomaly-card-meta">
                                     <span className="anomaly-meta-label">Sequence</span>

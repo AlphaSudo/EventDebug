@@ -12,6 +12,8 @@ import io.eventlens.spi.EventQuery;
 import io.eventlens.spi.EventQueryResult;
 import io.eventlens.spi.EventSourceCapabilities;
 import io.eventlens.spi.EventSourcePlugin;
+import io.eventlens.spi.EventStatistics;
+import io.eventlens.spi.EventStatisticsQuery;
 import io.eventlens.spi.HealthStatus;
 
 import java.util.List;
@@ -88,6 +90,11 @@ public class PostgresEventSourcePlugin implements EventSourcePlugin, EventStoreR
         } catch (Exception e) {
             return HealthStatus.down(e.getMessage() != null ? e.getMessage() : "postgres health check failed");
         }
+    }
+
+    @Override
+    public EventStatistics statistics(EventStatisticsQuery query) {
+        return requireReader().statistics(query);
     }
 
     @Override
