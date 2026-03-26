@@ -52,6 +52,9 @@ eventlens-api/exports/
 
 #personal files
 tests/
+!eventlens-ui/tests/
+!eventlens-ui/tests/e2e/
+!eventlens-ui/tests/e2e/*.ts
 versions/
 loadtests/
 plans/
