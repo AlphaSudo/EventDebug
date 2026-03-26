@@ -17,7 +17,9 @@ val npmInstall by tasks.registering(Exec::class) {
 
     commandLine(
         if (System.getProperty("os.name").lowercase().contains("win")) "npm.cmd" else "npm",
-        "install"
+        "ci",
+        "--no-audit",
+        "--no-fund"
     )
 }
 

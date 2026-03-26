@@ -14,3 +14,6 @@ dependencies {
     testImplementation("org.testcontainers:mysql:1.20.1")
 }
 
+tasks.named("processResources") {
+    dependsOn(":eventlens-ui:npmBuild")
+}
