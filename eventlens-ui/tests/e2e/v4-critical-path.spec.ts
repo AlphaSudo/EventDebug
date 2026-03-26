@@ -6,7 +6,8 @@ test('state diff compare mode is shareable by URL', async ({ page }) => {
   const stateViewer = page.getByRole('region', { name: 'State viewer' });
   await expect(stateViewer).toBeVisible();
   await expect(stateViewer.locator('.diff-count-badge').filter({ hasText: 'Compared with #89' })).toBeVisible();
-  await expect(stateViewer.getByText('Structural diff', { exact: true })).toBeVisible();
+  await expect(stateViewer.locator('.diff-panel')).toBeVisible();
+  await expect(stateViewer.locator('.diff-toolbar-title')).toContainText('Structural diff');
 });
 
 test('replay debugger keeps panel and position in URL while stepping', async ({ page }) => {
