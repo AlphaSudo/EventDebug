@@ -273,7 +273,14 @@ export default function App() {
                         <div className="workspace-kpi-row"><span>Issues</span><strong>{issueCount}</strong></div>
                     </div>
                 </div>
-                <button type="button" className="workspace-dock-handle" onClick={() => setWorkspaceDockOpen(o => !o)} aria-expanded={workspaceDockOpen} aria-controls="workspace-dock-panel">
+                <button
+                    type="button"
+                    className="workspace-dock-handle"
+                    onClick={() => setWorkspaceDockOpen(o => !o)}
+                    aria-expanded={workspaceDockOpen}
+                    aria-controls="workspace-dock-panel"
+                    aria-label={workspaceDockOpen ? 'Collapse workspace panel' : 'Expand workspace panel'}
+                >
                     <span className="workspace-dock-chevron" aria-hidden>{workspaceDockOpen ? '>' : '<'}</span>
                 </button>
             </aside>

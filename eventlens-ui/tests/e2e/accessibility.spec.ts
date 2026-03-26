@@ -3,6 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 
 test('main shell has no critical accessibility violations', async ({ page }) => {
   await page.goto('/');
+  await expect(page.getByRole('main', { name: 'EventLens workspace' })).toBeVisible();
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations.filter(v => v.impact === 'critical')).toEqual([]);
 });

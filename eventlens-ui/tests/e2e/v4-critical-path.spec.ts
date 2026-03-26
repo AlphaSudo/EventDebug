@@ -3,9 +3,10 @@ import { expect, test } from '@playwright/test';
 test('state diff compare mode is shareable by URL', async ({ page }) => {
   await page.goto('/?aggregateId=order-demo-001&seq=100&compare=89&tab=changes&panel=state');
 
-  await expect(page.getByRole('region', { name: 'State viewer' })).toBeVisible();
-  await expect(page.getByText('Compared with #89')).toBeVisible();
-  await expect(page.getByText('Structural diff')).toBeVisible();
+  const stateViewer = page.getByRole('region', { name: 'State viewer' });
+  await expect(stateViewer).toBeVisible();
+  await expect(stateViewer.locator('.diff-count-badge').filter({ hasText: 'Compared with #89' })).toBeVisible();
+  await expect(stateViewer.getByText('Structural diff', { exact: true })).toBeVisible();
 });
 
 test('replay debugger keeps panel and position in URL while stepping', async ({ page }) => {
@@ -20,9 +21,11 @@ test('replay debugger keeps panel and position in URL while stepping', async ({ 
 test('statistics panel renders in demo mode', async ({ page }) => {
   await page.goto('/#/stats');
 
-  await expect(page.getByRole('region', { name: 'Statistics panel' })).toBeVisible();
-  await expect(page.getByText('Total events')).toBeVisible();
-  await expect(page.getByText('100')).toBeVisible();
+  const statisticsPanel = page.getByRole('region', { name: 'Statistics panel' });
+  await expect(statisticsPanel).toBeVisible();
+  const totalEventsCard = statisticsPanel.locator('.stat-card').filter({ hasText: 'Total events' });
+  await expect(totalEventsCard).toBeVisible();
+  await expect(totalEventsCard.locator('strong')).toHaveText('100');
 });
 
 test('command palette opens aggregate and keyboard navigation advances the selection', async ({ page }) => {
@@ -30,8 +33,8 @@ test('command palette opens aggregate and keyboard navigation advances the selec
 
   await page.keyboard.press('Control+K');
   await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
-  await page.getByLabel('Command palette search').fill('demo');
-  await page.keyboard.press('Enter');
+  await page.getByLabel('Command palette search').fill('order-demo-001');
+  await page.getByRole('option', { name: 'Open aggregate order-demo-001' }).click();
 
   await expect(page).toHaveURL(/aggregateId=order-demo-001/);
   await expect(page.getByText('Viewing:')).toBeVisible();

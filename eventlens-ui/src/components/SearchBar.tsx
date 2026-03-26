@@ -80,7 +80,6 @@ export default function SearchBar({ onSelect, source, selectedValue }: Props) {
                     if (e.key === 'Escape') setOpen(false);
                 }}
                 autoComplete="off"
-                aria-expanded={open}
                 aria-controls="aggregate-search-results"
                 aria-autocomplete="list"
             />

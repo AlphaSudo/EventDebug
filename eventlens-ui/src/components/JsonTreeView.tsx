@@ -12,7 +12,7 @@ function JsonToggle({ open, onToggle }: { open: boolean; onToggle: () => void })
             aria-expanded={open}
             aria-label={open ? 'Collapse' : 'Expand'}
         >
-            {open ? '▼' : '▶'}
+            {open ? '-' : '+'}
         </button>
     );
 }
@@ -35,13 +35,12 @@ interface NodeProps {
     depth: number;
     propertyKey?: string;
     changedKeys?: Set<string>;
-    /** full dot-path from root, used to match changedKeys */
     keyPath?: string;
 }
 
 export default function JsonTreeView({ value, changedKeys }: { value: unknown; changedKeys?: Set<string> }) {
     return (
-        <div className="json-tree json-tree-root" role="tree">
+        <div className="json-tree json-tree-root">
             <JsonNode value={value} depth={0} changedKeys={changedKeys} keyPath="" />
         </div>
     );
@@ -49,10 +48,8 @@ export default function JsonTreeView({ value, changedKeys }: { value: unknown; c
 
 function JsonNode({ value, depth, propertyKey, changedKeys, keyPath = '' }: NodeProps) {
     const isChanged = changedKeys && propertyKey !== undefined && changedKeys.has(propertyKey);
-    // also match nested paths like "address.city"
     const isParentChanged = changedKeys && keyPath && [...changedKeys].some(k => k.startsWith(keyPath + '.'));
 
-    // Auto-expand changed nodes, but only if changedKeys is provided
     const autoOpen = changedKeys
         ? depth < 3 || !!isChanged || !!isParentChanged
         : depth < 3;

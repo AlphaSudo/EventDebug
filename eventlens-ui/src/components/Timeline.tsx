@@ -74,7 +74,6 @@ function renderEventStep(
                 }
             }}
             aria-current={selected ? 'step' : undefined}
-            aria-selected={selected}
             aria-label={eventRowLabel(row.stepNumber, event)}
         >
             <span className="timeline-step-badge">Event {row.stepNumber}</span>
