@@ -1,0 +1,2 @@
+io.eventlens.pg.PostgresEventSourcePlugin
+io.eventlens.mysql.MySqlEventSourcePlugin
