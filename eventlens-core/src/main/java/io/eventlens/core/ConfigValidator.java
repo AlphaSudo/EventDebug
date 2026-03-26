@@ -87,6 +87,7 @@ public final class ConfigValidator {
             }
         }
 
+        validateMetadata(config, issues);
         validateLegacyDatasource(config, issues);
         validateDatasourceInstances(config.getDatasourcesOrLegacy(), issues);
         validateStreamInstances(config.getStreamsOrLegacy(), issues);
@@ -212,6 +213,33 @@ public final class ConfigValidator {
                 }
             }
         }
+    }
+
+    private static void validateMetadata(EventLensConfig config, List<ValidationError> issues) {
+        var security = config.getSecurity();
+        if (security == null || security.getMetadata() == null) {
+            return;
+        }
+
+        var metadata = security.getMetadata();
+        if (!metadata.isEnabled()) {
+            return;
+        }
+
+        if (isBlank(metadata.getJdbcUrl())) {
+            issues.add(error("security.metadata.jdbc-url", "Required when metadata storage is enabled"));
+        } else if (!metadata.getJdbcUrl().startsWith("jdbc:sqlite:")) {
+            issues.add(error("security.metadata.jdbc-url", "v5 metadata storage currently supports SQLite only"));
+        } else if ("jdbc:sqlite::memory:".equalsIgnoreCase(metadata.getJdbcUrl())) {
+            issues.add(warning("security.metadata.jdbc-url",
+                    "In-memory metadata loses sessions, API keys, and DB-backed audit data on restart"));
+        }
+
+        if (metadata.getBusyTimeoutMs() < 0 || metadata.getBusyTimeoutMs() > 600_000) {
+            issues.add(error("security.metadata.busy-timeout-ms", "Must be between 0 and 600000"));
+        }
+
+        validatePool("security.metadata.pool", metadata.getPool(), issues);
     }
 
     private static void validatePool(String base, EventLensConfig.PoolConfig pool, List<ValidationError> issues) {

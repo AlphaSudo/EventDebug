@@ -18,6 +18,7 @@ public class EventLensConfig {
     private AnomalyConfig anomaly = new AnomalyConfig();
     private UiConfig ui = new UiConfig();
     private AuditConfig audit = new AuditConfig();
+    private SecurityFeaturesConfig security = new SecurityFeaturesConfig();
     private DataProtectionConfig dataProtection = new DataProtectionConfig();
     private ExportConfig export = new ExportConfig();
     private PluginsConfig plugins = new PluginsConfig();
@@ -50,6 +51,9 @@ public class EventLensConfig {
 
     public AuditConfig getAudit() { return audit; }
     public void setAudit(AuditConfig audit) { this.audit = audit; }
+
+    public SecurityFeaturesConfig getSecurity() { return security; }
+    public void setSecurity(SecurityFeaturesConfig security) { this.security = security; }
 
     public DataProtectionConfig getDataProtection() { return dataProtection; }
     public void setDataProtection(DataProtectionConfig dataProtection) { this.dataProtection = dataProtection; }
@@ -121,6 +125,43 @@ public class EventLensConfig {
         private RateLimitConfig rateLimit = new RateLimitConfig();
         public RateLimitConfig getRateLimit() { return rateLimit; }
         public void setRateLimit(RateLimitConfig rateLimit) { this.rateLimit = rateLimit; }
+    }
+
+    public static class SecurityFeaturesConfig {
+        private MetadataConfig metadata = new MetadataConfig();
+
+        public MetadataConfig getMetadata() { return metadata; }
+        public void setMetadata(MetadataConfig metadata) { this.metadata = metadata; }
+    }
+
+    public static class MetadataConfig {
+        private boolean enabled = false;
+        private String jdbcUrl = "jdbc:sqlite:./data/eventlens-metadata.db";
+        private PoolConfig pool = defaultPool();
+        private boolean walEnabled = true;
+        private int busyTimeoutMs = 5_000;
+        private boolean foreignKeysEnabled = true;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getJdbcUrl() { return jdbcUrl; }
+        public void setJdbcUrl(String jdbcUrl) { this.jdbcUrl = jdbcUrl; }
+        public PoolConfig getPool() { return pool; }
+        public void setPool(PoolConfig pool) { this.pool = pool; }
+        public boolean isWalEnabled() { return walEnabled; }
+        public void setWalEnabled(boolean walEnabled) { this.walEnabled = walEnabled; }
+        public int getBusyTimeoutMs() { return busyTimeoutMs; }
+        public void setBusyTimeoutMs(int busyTimeoutMs) { this.busyTimeoutMs = busyTimeoutMs; }
+        public boolean isForeignKeysEnabled() { return foreignKeysEnabled; }
+        public void setForeignKeysEnabled(boolean foreignKeysEnabled) { this.foreignKeysEnabled = foreignKeysEnabled; }
+
+        private static PoolConfig defaultPool() {
+            PoolConfig pool = new PoolConfig();
+            pool.setMaximumPoolSize(4);
+            pool.setMinimumIdle(1);
+            pool.setLeakDetectionThresholdMs(0);
+            return pool;
+        }
     }
 
     public static class RateLimitConfig {
@@ -402,4 +443,3 @@ public class EventLensConfig {
         public void setMask(String mask) { this.mask = mask; }
     }
 }
-

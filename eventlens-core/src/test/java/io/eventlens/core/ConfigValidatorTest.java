@@ -51,4 +51,15 @@ class ConfigValidatorTest {
         var issues = ConfigValidator.validate(cfg);
         assertThat(issues.stream().filter(i -> i.severity() == ConfigValidator.ValidationError.Severity.ERROR && i.path().startsWith("datasources[0]")).toList()).isEmpty();
     }
+
+    @Test
+    void metadataStorageMustUseSqliteWhenEnabled() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().getMetadata().setEnabled(true);
+        cfg.getSecurity().getMetadata().setJdbcUrl("jdbc:postgresql://localhost/eventlens_metadata");
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.metadata.jdbc-url")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
 }
