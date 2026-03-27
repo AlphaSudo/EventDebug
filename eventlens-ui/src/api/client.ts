@@ -57,6 +57,54 @@ export interface AuthSessionResponse {
     csrfToken?: string;
 }
 
+export interface AuditEntry {
+    auditId: number;
+    action: string;
+    resourceType: string;
+    resourceId: string | null;
+    userId: string;
+    authMethod: string;
+    clientIp: string | null;
+    requestId: string | null;
+    userAgent: string | null;
+    details: Record<string, unknown>;
+    createdAt: string;
+}
+
+export interface AuditEntriesResponse {
+    entries: AuditEntry[];
+    limit: number;
+    action?: string | null;
+    userId?: string | null;
+}
+
+export interface ManagedApiKey {
+    apiKeyId: string;
+    keyPrefix: string;
+    description?: string | null;
+    principalUserId: string;
+    roles: string[];
+    createdAt: string;
+    expiresAt?: string | null;
+    revokedAt?: string | null;
+    lastUsedAt?: string | null;
+}
+
+export interface ManagedApiKeysResponse {
+    entries: ManagedApiKey[];
+}
+
+export interface CreateApiKeyRequest {
+    principalUserId: string;
+    roles: string[];
+    description?: string;
+    expiresAt?: string;
+}
+
+export interface CreateApiKeyResponse extends ManagedApiKey {
+    apiKey: string;
+}
+
 function delay(ms: number) {
     return new Promise<void>(resolve => {
         setTimeout(resolve, ms);
@@ -209,6 +257,22 @@ export const getAuthSession = async () => {
         } satisfies AuthSessionResponse;
     }
     return api.get<AuthSessionResponse>('/v1/auth/session').then(r => r.data);
+};
+
+export const getAuditEntries = async (limit = 25) => {
+    return api.get<AuditEntriesResponse>(`/v1/audit?limit=${limit}`).then(r => r.data);
+};
+
+export const getManagedApiKeys = async () => {
+    return api.get<ManagedApiKeysResponse>('/v1/admin/api-keys').then(r => r.data);
+};
+
+export const createManagedApiKey = async (payload: CreateApiKeyRequest) => {
+    return api.post<CreateApiKeyResponse>('/v1/admin/api-keys', payload).then(r => r.data);
+};
+
+export const revokeManagedApiKey = async (apiKeyId: string) => {
+    return api.post<{ apiKeyId: string; revoked: boolean }>(`/v1/admin/api-keys/${encodeURIComponent(apiKeyId)}/revoke`).then(r => r.data);
 };
 
 export const loginWithBasicSession = async (username: string, password: string, returnHash: string) => {

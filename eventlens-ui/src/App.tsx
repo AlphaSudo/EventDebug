@@ -10,6 +10,7 @@ import ReplayDebugger from './components/ReplayDebugger';
 import StatisticsPanel from './components/StatisticsPanel';
 import CommandPalette from './components/CommandPalette';
 import KeyboardManager from './components/KeyboardManager';
+import AdminConsole from './components/AdminConsole';
 import {
     buildOidcLoginUrl,
     getAuthSession,
@@ -251,6 +252,7 @@ export default function App() {
 
     const isUp = health?.status === 'UP';
     const statsView = currentHash === '#/stats';
+    const adminView = currentHash === '#/admin';
     const healthySources = datasources.filter(source => isHealthyStatus(source.status)).length;
     const healthyPlugins = plugins.filter(plugin => isHealthyStatus(plugin.lifecycle)).length;
     const issueCount = (datasources.length - healthySources) + (plugins.length - healthyPlugins);
@@ -265,6 +267,10 @@ export default function App() {
 
     const openMainPage = () => {
         window.location.hash = '#/timeline';
+    };
+
+    const openAdminPage = () => {
+        window.location.hash = '#/admin';
     };
 
     const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
@@ -398,6 +404,7 @@ export default function App() {
                 onSelectAggregate={openAggregate}
                 onOpenHome={openMainPage}
                 onOpenStats={() => { window.location.hash = '#/stats'; }}
+                onOpenAdmin={openAdminPage}
             />
             <header className="app-header">
                 <div className="brand">
@@ -417,6 +424,13 @@ export default function App() {
                                 <span className="header-user-label">Signed in</span>
                                 <strong className="header-user-name">{authQuery.data.principal.displayName}</strong>
                             </div>
+                            <button
+                                className={`header-user-action ${adminView ? 'header-user-action--active' : ''}`}
+                                type="button"
+                                onClick={openAdminPage}
+                            >
+                                Admin
+                            </button>
                             <button className="header-user-action" type="button" onClick={handleLogout} disabled={isSubmittingLogout}>
                                 {isSubmittingLogout ? 'Signing out...' : 'Sign out'}
                             </button>
@@ -471,7 +485,7 @@ export default function App() {
 
             <main className="app-main" role="main" aria-label="EventLens workspace">
                 <div className="workspace-content">
-                    {!statsView && (
+                    {!statsView && !adminView && (
                         <div className="card search-panel card--dropdown-host">
                             <label className="control-field-label" htmlFor="aggregate-search">Search Aggregates</label>
                             <SearchBar onSelect={openAggregate} source={selectedSource || null} selectedValue={selectedAggregate} />
@@ -489,6 +503,8 @@ export default function App() {
 
                     {statsView ? (
                         <StatisticsPanel source={selectedSource || null} onBack={openMainPage} />
+                    ) : adminView ? (
+                        <AdminConsole />
                     ) : (
                         <>
                             {selectedAggregate && (
