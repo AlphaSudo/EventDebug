@@ -478,6 +478,130 @@ class AuthenticationIntegrationTest {
         assertThat(response.body()).contains("\"permission\":\"VIEW_AUDIT_LOG\"");
     }
 
+    @Test
+    void apiKeyCanAuthenticateRequestsAfterAdminCreation() throws Exception {
+        int port = freePort();
+        server = startServer(port, true, null, cfg -> {
+            cfg.getSecurity().getAuth().getApiKeys().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setPrincipalRoles(Map.of("admin", List.of("key-admin")));
+
+            var adminRole = new EventLensConfig.RoleConfig();
+            adminRole.setId("key-admin");
+            adminRole.setPermissions(List.of("SEARCH_AGGREGATES", "MANAGE_API_KEYS"));
+
+            var apiReader = new EventLensConfig.RoleConfig();
+            apiReader.setId("api-reader");
+            apiReader.setPermissions(List.of("SEARCH_AGGREGATES"));
+
+            cfg.getSecurity().getAuthorization().setRoles(List.of(adminRole, apiReader));
+        });
+
+        var client = HttpClient.newHttpClient();
+        var createRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/admin/api-keys".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("""
+                        {"principalUserId":"svc-orders","roles":["api-reader"],"description":"Orders automation"}
+                        """))
+                .build();
+        HttpResponse<String> createResponse = client.send(createRequest, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(createResponse.statusCode()).isEqualTo(201);
+        String apiKey = extractJsonField(createResponse.body(), "apiKey");
+        assertThat(apiKey).startsWith("el_");
+
+        var searchRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/search?q=ord".formatted(port)))
+                .header("X-API-Key", apiKey)
+                .GET()
+                .build();
+        HttpResponse<String> searchResponse = client.send(searchRequest, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(searchResponse.statusCode()).isEqualTo(200);
+        assertThat(searchResponse.body()).contains("ORD-1001");
+
+        var listRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/admin/api-keys".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .GET()
+                .build();
+        HttpResponse<String> listResponse = client.send(listRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(listResponse.statusCode()).isEqualTo(200);
+        assertThat(listResponse.body()).contains("\"principalUserId\":\"svc-orders\"");
+        assertThat(listResponse.body()).contains("\"lastUsedAt\"");
+        assertThat(listResponse.body()).doesNotContain(apiKey);
+    }
+
+    @Test
+    void invalidApiKeyHeaderDoesNotFallBackToBasicAuth() throws Exception {
+        int port = freePort();
+        server = startServer(port, true, null, cfg -> cfg.getSecurity().getAuth().getApiKeys().setEnabled(true));
+
+        var client = HttpClient.newHttpClient();
+        var request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/search?q=ord".formatted(port)))
+                .header("X-API-Key", "el_test.invalid")
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void revokedApiKeyCanNoLongerAuthenticate() throws Exception {
+        int port = freePort();
+        server = startServer(port, true, null, cfg -> {
+            cfg.getSecurity().getAuth().getApiKeys().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setPrincipalRoles(Map.of("admin", List.of("key-admin")));
+
+            var adminRole = new EventLensConfig.RoleConfig();
+            adminRole.setId("key-admin");
+            adminRole.setPermissions(List.of("SEARCH_AGGREGATES", "MANAGE_API_KEYS"));
+
+            var apiReader = new EventLensConfig.RoleConfig();
+            apiReader.setId("api-reader");
+            apiReader.setPermissions(List.of("SEARCH_AGGREGATES"));
+
+            cfg.getSecurity().getAuthorization().setRoles(List.of(adminRole, apiReader));
+        });
+
+        var client = HttpClient.newHttpClient();
+        var createRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/admin/api-keys".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("""
+                        {"principalUserId":"svc-orders","roles":["api-reader"],"description":"Orders automation"}
+                        """))
+                .build();
+        HttpResponse<String> createResponse = client.send(createRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(createResponse.statusCode()).isEqualTo(201);
+        String apiKey = extractJsonField(createResponse.body(), "apiKey");
+        String apiKeyId = extractJsonField(createResponse.body(), "apiKeyId");
+
+        var revokeRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/admin/api-keys/%s/revoke".formatted(port, apiKeyId)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> revokeResponse = client.send(revokeRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(revokeResponse.statusCode()).isEqualTo(200);
+
+        var searchRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/search?q=ord".formatted(port)))
+                .header("X-API-Key", apiKey)
+                .GET()
+                .build();
+        HttpResponse<String> searchResponse = client.send(searchRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(searchResponse.statusCode()).isEqualTo(401);
+    }
+
     private EventLensServer startServer(int port, boolean authEnabled) {
         return startServer(port, authEnabled, null, cfg -> {});
     }

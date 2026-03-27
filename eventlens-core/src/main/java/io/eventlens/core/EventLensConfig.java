@@ -144,6 +144,7 @@ public class EventLensConfig {
         private String provider = "disabled";
         private SessionConfig session = new SessionConfig();
         private OidcConfig oidc = new OidcConfig();
+        private ApiKeysConfig apiKeys = new ApiKeysConfig();
 
         public String getProvider() { return provider; }
         public void setProvider(String provider) { this.provider = provider; }
@@ -151,6 +152,8 @@ public class EventLensConfig {
         public void setSession(SessionConfig session) { this.session = session; }
         public OidcConfig getOidc() { return oidc; }
         public void setOidc(OidcConfig oidc) { this.oidc = oidc; }
+        public ApiKeysConfig getApiKeys() { return apiKeys; }
+        public void setApiKeys(ApiKeysConfig apiKeys) { this.apiKeys = apiKeys; }
     }
 
     public static class SessionConfig {
@@ -192,6 +195,19 @@ public class EventLensConfig {
         public void setPostLogoutRedirectPath(String postLogoutRedirectPath) { this.postLogoutRedirectPath = postLogoutRedirectPath; }
         public List<String> getScopes() { return scopes; }
         public void setScopes(List<String> scopes) { this.scopes = scopes == null ? List.of() : scopes; }
+    }
+
+    public static class ApiKeysConfig {
+        private boolean enabled = false;
+        private String headerName = "X-API-Key";
+        private String keyPrefix = "el";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getHeaderName() { return headerName; }
+        public void setHeaderName(String headerName) { this.headerName = headerName; }
+        public String getKeyPrefix() { return keyPrefix; }
+        public void setKeyPrefix(String keyPrefix) { this.keyPrefix = keyPrefix; }
     }
 
     public static class MetadataConfig {

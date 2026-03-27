@@ -10,6 +10,7 @@ import io.eventlens.api.shutdown.GracefulShutdown;
 import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.routes.MetricsRoutes;
 import io.eventlens.api.http.RequestContextMdcFilter;
+import io.eventlens.api.security.ApiKeyAuthenticator;
 import io.eventlens.api.security.BasicAuthenticator;
 import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.api.security.SessionAuthenticator;
@@ -27,6 +28,7 @@ import io.eventlens.core.metadata.MetadataDatabase;
 import io.eventlens.core.pii.PiiMasker;
 import io.eventlens.core.pii.SensitiveDataProtector;
 import io.eventlens.core.plugin.PluginManager;
+import io.eventlens.core.security.ApiKeyService;
 import io.eventlens.core.security.AuthorizationService;
 import io.eventlens.core.security.Principal;
 import io.eventlens.core.security.SessionService;
@@ -170,16 +172,24 @@ public class EventLensServer {
         var authConfig = config.getServer().getAuth();
         var v5AuthConfig = config.getSecurity() != null ? config.getSecurity().getAuth() : null;
         var authProvider = v5AuthConfig != null ? v5AuthConfig.getProvider() : "disabled";
+        var apiKeysConfig = v5AuthConfig != null ? v5AuthConfig.getApiKeys() : new EventLensConfig.ApiKeysConfig();
+        boolean apiKeysEnabled = apiKeysConfig != null && apiKeysConfig.isEnabled() && this.metadataDatabase.isEnabled();
         boolean sessionProviderEnabled = "basic".equalsIgnoreCase(authProvider) || "oidc".equalsIgnoreCase(authProvider);
         boolean oidcEnabled = "oidc".equalsIgnoreCase(authProvider);
         boolean basicCompatibilityEnabled = authConfig.isEnabled();
-        boolean authEnabled = basicCompatibilityEnabled || sessionProviderEnabled;
+        boolean authEnabled = basicCompatibilityEnabled || sessionProviderEnabled || apiKeysEnabled;
         var sessionConfig = v5AuthConfig != null ? v5AuthConfig.getSession() : new EventLensConfig.SessionConfig();
         var oidcCallbackPath = oidcEnabled ? v5AuthConfig.getOidc().getRedirectPath() : "/api/v1/auth/callback";
         var basicAuthenticator = new BasicAuthenticator(
                 authConfig.getUsername(),
                 authConfig.getPassword(),
                 "EventLens");
+        var apiKeyService = apiKeysEnabled
+                ? new ApiKeyService(this.metadataDatabase.repositories().apiKeys(), apiKeysConfig)
+                : null;
+        var apiKeyAuthenticator = apiKeyService != null
+                ? new ApiKeyAuthenticator(apiKeyService, apiKeysConfig.getHeaderName())
+                : null;
         var sessionService = this.metadataDatabase.isEnabled()
                 ? new SessionService(this.metadataDatabase.repositories().sessions(), sessionConfig)
                 : null;
@@ -200,6 +210,7 @@ public class EventLensServer {
                         new OidcLoginStateService(this.metadataDatabase.repositories().sessions()),
                         auditLogger)
                 : null;
+        var apiKeyRoutes = apiKeyService != null ? new ApiKeyRoutes(apiKeyService, routeAuthorizer, auditLogger) : null;
 
         // ── Javalin 7: all routes + handlers inside cfg.routes ────────────
         this.app = Javalin.create(cfg -> {
@@ -337,7 +348,13 @@ public class EventLensServer {
                         return;
                     }
 
-                    var authHolder = resolveAuthentication(ctx, sessionAuthenticator, basicCompatibilityEnabled ? basicAuthenticator : null, sessionConfig.getCookieName());
+                    var authHolder = resolveAuthentication(
+                            ctx,
+                            apiKeyAuthenticator,
+                            sessionAuthenticator,
+                            basicCompatibilityEnabled ? basicAuthenticator : null,
+                            apiKeysConfig != null ? apiKeysConfig.getHeaderName() : "X-API-Key",
+                            sessionConfig.getCookieName());
                     var authResult = authHolder.result();
                     if (!authResult.success()) {
                         // 1.8 - emit LOGIN_FAILED
@@ -377,7 +394,13 @@ public class EventLensServer {
                     }
                 });
                 cfg.routes.before("/ws/*", ctx -> {
-                    var authResult = resolveAuthentication(ctx, sessionAuthenticator, basicCompatibilityEnabled ? basicAuthenticator : null, sessionConfig.getCookieName()).result();
+                    var authResult = resolveAuthentication(
+                            ctx,
+                            apiKeyAuthenticator,
+                            sessionAuthenticator,
+                            basicCompatibilityEnabled ? basicAuthenticator : null,
+                            apiKeysConfig != null ? apiKeysConfig.getHeaderName() : "X-API-Key",
+                            sessionConfig.getCookieName()).result();
                     if (!authResult.success()) {
                         ctx.status(401);
                         if (authResult.challengeHeader() != null) {
@@ -404,6 +427,11 @@ public class EventLensServer {
             // Metrics (4.1)
             cfg.routes.get("/api/v1/metrics", metricsRoutes::metrics);
             cfg.routes.get("/api/v1/audit", auditRoutes::recent);
+            if (apiKeyRoutes != null) {
+                cfg.routes.get("/api/v1/admin/api-keys", apiKeyRoutes::list);
+                cfg.routes.post("/api/v1/admin/api-keys", apiKeyRoutes::create);
+                cfg.routes.post("/api/v1/admin/api-keys/{id}/revoke", apiKeyRoutes::revoke);
+            }
 
             // OpenAPI (5.2)
             cfg.routes.get("/api/v1/openapi.json", openApiRoutes::spec);
@@ -620,9 +648,14 @@ public class EventLensServer {
 
     private static AuthenticationResultHolder resolveAuthentication(
             io.javalin.http.Context ctx,
+            ApiKeyAuthenticator apiKeyAuthenticator,
             SessionAuthenticator sessionAuthenticator,
             BasicAuthenticator basicAuthenticator,
+            String apiKeyHeaderName,
             String sessionCookieName) {
+        if (apiKeyAuthenticator != null && hasApiKeyHeader(ctx, apiKeyHeaderName)) {
+            return new AuthenticationResultHolder("api-key", apiKeyAuthenticator.authenticate(ctx));
+        }
         if (sessionAuthenticator != null && hasSessionCookie(ctx, sessionCookieName)) {
             return new AuthenticationResultHolder("session", sessionAuthenticator.authenticate(ctx));
         }
@@ -630,6 +663,11 @@ public class EventLensServer {
             return new AuthenticationResultHolder("basic", basicAuthenticator.authenticate(ctx));
         }
         return new AuthenticationResultHolder("session", io.eventlens.api.security.AuthenticationResult.failure(null, "missing_session", null));
+    }
+
+    private static boolean hasApiKeyHeader(io.javalin.http.Context ctx, String headerName) {
+        String value = ctx.header(headerName);
+        return value != null && !value.isBlank();
     }
 
     private record AuthenticationResultHolder(String method, io.eventlens.api.security.AuthenticationResult result) {

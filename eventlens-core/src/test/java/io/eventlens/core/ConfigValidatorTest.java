@@ -91,6 +91,19 @@ class ConfigValidatorTest {
     }
 
     @Test
+    void apiKeysRequireMetadataAndHeaderNameWhenEnabled() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().getAuth().getApiKeys().setEnabled(true);
+        cfg.getSecurity().getAuth().getApiKeys().setHeaderName(" ");
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.metadata.enabled")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.api-keys.header-name")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
+
+    @Test
     void authorizationRequiresKnownRolesAndPermissions() {
         var cfg = new EventLensConfig();
         cfg.getSecurity().getAuthorization().setEnabled(true);

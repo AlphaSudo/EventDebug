@@ -261,6 +261,7 @@ public final class ConfigValidator {
         }
 
         var session = auth.getSession();
+        var apiKeys = auth.getApiKeys();
         if (session != null) {
             if (isBlank(session.getCookieName())) {
                 issues.add(error("security.auth.session.cookie-name", "Required"));
@@ -287,6 +288,20 @@ public final class ConfigValidator {
                     && !session.isSecureCookie()) {
                 issues.add(error("security.auth.session.secure-cookie",
                         "Must be true for __Host- prefixed cookies"));
+            }
+        }
+
+        if (apiKeys != null && apiKeys.isEnabled()) {
+            if (security.getMetadata() == null || !security.getMetadata().isEnabled()) {
+                issues.add(error("security.metadata.enabled", "Must be enabled when security.auth.api-keys.enabled is true"));
+            }
+            if (isBlank(apiKeys.getHeaderName())) {
+                issues.add(error("security.auth.api-keys.header-name", "Required when API keys are enabled"));
+            }
+            if (isBlank(apiKeys.getKeyPrefix())) {
+                issues.add(error("security.auth.api-keys.key-prefix", "Required when API keys are enabled"));
+            } else if (!apiKeys.getKeyPrefix().matches("[A-Za-z0-9_-]{2,32}")) {
+                issues.add(error("security.auth.api-keys.key-prefix", "Must be 2-32 chars of letters, digits, '_' or '-'"));
             }
         }
 
