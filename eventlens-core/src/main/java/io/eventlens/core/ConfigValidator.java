@@ -4,6 +4,7 @@ import io.eventlens.core.engine.BisectEngine;
 import io.eventlens.core.exception.ConfigurationException;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -88,6 +89,7 @@ public final class ConfigValidator {
         }
 
         validateMetadata(config, issues);
+        validateSecurityAuth(config, issues);
         validateLegacyDatasource(config, issues);
         validateDatasourceInstances(config.getDatasourcesOrLegacy(), issues);
         validateStreamInstances(config.getStreamsOrLegacy(), issues);
@@ -242,6 +244,91 @@ public final class ConfigValidator {
         validatePool("security.metadata.pool", metadata.getPool(), issues);
     }
 
+    private static void validateSecurityAuth(EventLensConfig config, List<ValidationError> issues) {
+        var security = config.getSecurity();
+        if (security == null || security.getAuth() == null) {
+            return;
+        }
+
+        var auth = security.getAuth();
+        String provider = auth.getProvider() == null ? "disabled" : auth.getProvider().trim().toLowerCase();
+        if (!Set.of("disabled", "basic", "oidc").contains(provider)) {
+            issues.add(error("security.auth.provider", "Must be one of: disabled, basic, oidc"));
+            return;
+        }
+
+        var session = auth.getSession();
+        if (session != null) {
+            if (isBlank(session.getCookieName())) {
+                issues.add(error("security.auth.session.cookie-name", "Required"));
+            }
+            if (session.getIdleTimeoutSeconds() < 60 || session.getIdleTimeoutSeconds() > 86_400) {
+                issues.add(error("security.auth.session.idle-timeout-seconds", "Must be between 60 and 86400"));
+            }
+            if (session.getAbsoluteTimeoutSeconds() < session.getIdleTimeoutSeconds()) {
+                issues.add(error("security.auth.session.absolute-timeout-seconds",
+                        "Must be >= idle-timeout-seconds"));
+            }
+            if (session.getAbsoluteTimeoutSeconds() > 604_800) {
+                issues.add(error("security.auth.session.absolute-timeout-seconds", "Must be <= 604800"));
+            }
+            if (!Set.of("lax", "strict", "none").contains(normalize(session.getSameSite()))) {
+                issues.add(error("security.auth.session.same-site", "Must be one of: Lax, Strict, None"));
+            }
+            if ("none".equals(normalize(session.getSameSite())) && !session.isSecureCookie()) {
+                issues.add(error("security.auth.session.secure-cookie",
+                        "Must be true when same-site is None"));
+            }
+            if (session.getCookieName() != null
+                    && session.getCookieName().startsWith("__Host-")
+                    && !session.isSecureCookie()) {
+                issues.add(error("security.auth.session.secure-cookie",
+                        "Must be true for __Host- prefixed cookies"));
+            }
+        }
+
+        if ("oidc".equals(provider)) {
+            if (security.getMetadata() == null || !security.getMetadata().isEnabled()) {
+                issues.add(error("security.metadata.enabled", "Must be enabled when security.auth.provider is oidc"));
+            }
+
+            var oidc = auth.getOidc();
+            if (oidc == null) {
+                issues.add(error("security.auth.oidc", "Required when provider is oidc"));
+                return;
+            }
+            if (isBlank(oidc.getIssuer())) {
+                issues.add(error("security.auth.oidc.issuer", "Required when provider is oidc"));
+            }
+            if (isBlank(oidc.getClientId())) {
+                issues.add(error("security.auth.oidc.client-id", "Required when provider is oidc"));
+            }
+            if (isBlank(oidc.getClientSecret())) {
+                issues.add(error("security.auth.oidc.client-secret", "Required when provider is oidc"));
+            }
+            if (isBlank(oidc.getRedirectPath()) || !oidc.getRedirectPath().startsWith("/")) {
+                issues.add(error("security.auth.oidc.redirect-path", "Must start with '/'"));
+            }
+            if (isBlank(oidc.getPostLogoutRedirectPath()) || !oidc.getPostLogoutRedirectPath().startsWith("/")) {
+                issues.add(error("security.auth.oidc.post-logout-redirect-path", "Must start with '/'"));
+            }
+            if (oidc.getScopes() == null || oidc.getScopes().isEmpty()) {
+                issues.add(error("security.auth.oidc.scopes", "At least one scope is required"));
+            } else {
+                var normalizedScopes = new HashSet<String>();
+                for (int i = 0; i < oidc.getScopes().size(); i++) {
+                    String scope = oidc.getScopes().get(i);
+                    String path = "security.auth.oidc.scopes[%d]".formatted(i);
+                    if (isBlank(scope)) {
+                        issues.add(error(path, "Scope must not be blank"));
+                    } else if (!normalizedScopes.add(scope.trim().toLowerCase())) {
+                        issues.add(warning(path, "Duplicate scope"));
+                    }
+                }
+            }
+        }
+    }
+
     private static void validatePool(String base, EventLensConfig.PoolConfig pool, List<ValidationError> issues) {
         if (pool == null) {
             return;
@@ -290,4 +377,5 @@ public final class ConfigValidator {
     private static ValidationError error(String path, String message) { return new ValidationError(path, message, ValidationError.Severity.ERROR); }
     private static ValidationError warning(String path, String message) { return new ValidationError(path, message, ValidationError.Severity.WARNING); }
     private static boolean isBlank(String s) { return s == null || s.isBlank(); }
+    private static String normalize(String s) { return s == null ? "" : s.trim().toLowerCase(); }
 }

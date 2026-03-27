@@ -110,7 +110,8 @@ public class ServeCommand implements Runnable {
                 anomalyDetector,
                 exportEngine,
                 diffEngine,
-                datasourceStreamBindings(config));
+                datasourceStreamBindings(config),
+                metadataDatabase);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {

@@ -62,4 +62,31 @@ class ConfigValidatorTest {
         assertThat(issues.stream().anyMatch(i -> i.path().equals("security.metadata.jdbc-url")
                 && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
     }
+
+    @Test
+    void oidcProviderRequiresMetadataAndCoreSettings() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().getAuth().setProvider("oidc");
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.metadata.enabled")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.oidc.issuer")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.oidc.client-id")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.oidc.client-secret")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
+
+    @Test
+    void sessionCookieNoneRequiresSecureCookie() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().getAuth().getSession().setSameSite("None");
+        cfg.getSecurity().getAuth().getSession().setSecureCookie(false);
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.session.secure-cookie")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
 }

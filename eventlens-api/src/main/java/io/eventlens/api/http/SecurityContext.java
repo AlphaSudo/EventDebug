@@ -1,6 +1,7 @@
 package io.eventlens.api.http;
 
 import io.eventlens.core.audit.AuditEvent;
+import io.eventlens.core.metadata.SessionRecord;
 import io.eventlens.core.security.Principal;
 import io.javalin.http.Context;
 
@@ -10,6 +11,7 @@ import io.javalin.http.Context;
 public final class SecurityContext {
 
     public static final String ATTR_PRINCIPAL = "eventlensPrincipal";
+    public static final String ATTR_SESSION = "eventlensSession";
     private static final String LEGACY_AUDIT_USER_ID = "auditUserId";
     private static final String LEGACY_AUDIT_AUTH_METHOD = "auditAuthMethod";
 
@@ -27,6 +29,19 @@ public final class SecurityContext {
     public static Principal principal(Context ctx) {
         Principal principal = ctx.attribute(ATTR_PRINCIPAL);
         return principal != null ? principal : Principal.anonymous();
+    }
+
+    public static void setSession(Context ctx, SessionRecord session) {
+        ctx.attribute(ATTR_SESSION, session);
+    }
+
+    public static SessionRecord session(Context ctx) {
+        return ctx.attribute(ATTR_SESSION);
+    }
+
+    public static String csrfToken(Context ctx) {
+        SessionRecord session = session(ctx);
+        return session != null ? session.attributes().get("csrfToken") : null;
     }
 
     public static AuditEvent.Builder audit(Context ctx) {

@@ -11,6 +11,10 @@ import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.routes.MetricsRoutes;
 import io.eventlens.api.http.RequestContextMdcFilter;
 import io.eventlens.api.security.BasicAuthenticator;
+import io.eventlens.api.security.SessionAuthenticator;
+import io.eventlens.api.security.oidc.OidcIdTokenValidator;
+import io.eventlens.api.security.oidc.OidcLoginStateService;
+import io.eventlens.api.security.oidc.OidcProviderClient;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.aggregator.ReducerRegistry;
 import io.eventlens.core.RateLimiter;
@@ -18,9 +22,11 @@ import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.*;
 import io.eventlens.core.exception.QueryTimeoutException;
+import io.eventlens.core.metadata.MetadataDatabase;
 import io.eventlens.core.pii.PiiMasker;
 import io.eventlens.core.plugin.PluginManager;
 import io.eventlens.core.security.Principal;
+import io.eventlens.core.security.SessionService;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.Javalin;
 import io.javalin.compression.CompressionStrategy;
@@ -59,6 +65,7 @@ public class EventLensServer {
     private final int port;
     private final ExportService exportService;
     private final EventStoreReader reader;
+    private final MetadataDatabase metadataDatabase;
 
     public EventLensServer(
             EventLensConfig config,
@@ -71,7 +78,7 @@ public class EventLensServer {
             AnomalyDetector anomalyDetector,
             ExportEngine exportEngine,
             DiffEngine diffEngine) {
-        this(config, reader, replayEngine, reducerRegistry, pluginManager, defaultSourceId, bisectEngine, anomalyDetector, exportEngine, diffEngine, Map.of());
+        this(config, reader, replayEngine, reducerRegistry, pluginManager, defaultSourceId, bisectEngine, anomalyDetector, exportEngine, diffEngine, Map.of(), MetadataDatabase.disabled());
     }
 
     public EventLensServer(
@@ -86,8 +93,25 @@ public class EventLensServer {
             ExportEngine exportEngine,
             DiffEngine diffEngine,
             Map<String, String> sourceStreamBindings) {
+        this(config, reader, replayEngine, reducerRegistry, pluginManager, defaultSourceId, bisectEngine, anomalyDetector, exportEngine, diffEngine, sourceStreamBindings, MetadataDatabase.disabled());
+    }
+
+    public EventLensServer(
+            EventLensConfig config,
+            EventStoreReader reader,
+            ReplayEngine replayEngine,
+            ReducerRegistry reducerRegistry,
+            PluginManager pluginManager,
+            String defaultSourceId,
+            BisectEngine bisectEngine,
+            AnomalyDetector anomalyDetector,
+            ExportEngine exportEngine,
+            DiffEngine diffEngine,
+            Map<String, String> sourceStreamBindings,
+            MetadataDatabase metadataDatabase) {
         this.port = config.getServer().getPort();
         this.reader = reader;
+        this.metadataDatabase = metadataDatabase == null ? MetadataDatabase.disabled() : metadataDatabase;
 
         // ── 1.8 Audit Logger ──────────────────────────────────────────────
         final AuditLogger auditLogger = new AuditLogger(
@@ -134,6 +158,38 @@ public class EventLensServer {
         var liveTailWs         = new LiveTailWebSocket(sourceRegistry, pluginManager, auditLogger, defaultSourceId, sourceStreamBindings);
 
         var authConfig = config.getServer().getAuth();
+        var v5AuthConfig = config.getSecurity() != null ? config.getSecurity().getAuth() : null;
+        var authProvider = v5AuthConfig != null ? v5AuthConfig.getProvider() : "disabled";
+        boolean sessionProviderEnabled = "basic".equalsIgnoreCase(authProvider) || "oidc".equalsIgnoreCase(authProvider);
+        boolean oidcEnabled = "oidc".equalsIgnoreCase(authProvider);
+        boolean basicCompatibilityEnabled = authConfig.isEnabled();
+        boolean authEnabled = basicCompatibilityEnabled || sessionProviderEnabled;
+        var sessionConfig = v5AuthConfig != null ? v5AuthConfig.getSession() : new EventLensConfig.SessionConfig();
+        var oidcCallbackPath = oidcEnabled ? v5AuthConfig.getOidc().getRedirectPath() : "/api/v1/auth/callback";
+        var basicAuthenticator = new BasicAuthenticator(
+                authConfig.getUsername(),
+                authConfig.getPassword(),
+                "EventLens");
+        var sessionService = this.metadataDatabase.isEnabled()
+                ? new SessionService(this.metadataDatabase.repositories().sessions(), sessionConfig)
+                : null;
+        var sessionAuthenticator = sessionService != null
+                ? new SessionAuthenticator(sessionService, sessionConfig.getCookieName())
+                : null;
+        var authRoutes = sessionService != null
+                ? new AuthRoutes(sessionService, sessionConfig, basicAuthenticator, auditLogger, authProvider, basicCompatibilityEnabled)
+                : null;
+        var oidcProviderClient = new OidcProviderClient();
+        var oidcRoutes = oidcEnabled && sessionService != null
+                ? new OidcAuthRoutes(
+                        sessionService,
+                        sessionConfig,
+                        v5AuthConfig.getOidc(),
+                        oidcProviderClient,
+                        new OidcIdTokenValidator(oidcProviderClient),
+                        new OidcLoginStateService(this.metadataDatabase.repositories().sessions()),
+                        auditLogger)
+                : null;
 
         // ── Javalin 7: all routes + handlers inside cfg.routes ────────────
         this.app = Javalin.create(cfg -> {
@@ -254,55 +310,77 @@ public class EventLensServer {
                 });
             }
 
-            if (authConfig.isEnabled()) {
-                var basicAuthenticator = new BasicAuthenticator(
-                        authConfig.getUsername(),
-                        authConfig.getPassword(),
-                        "EventLens");
+            if (authEnabled) {
                 if ("changeme".equals(authConfig.getPassword())) {
                     log.warn("Basic auth is enabled with default password 'changeme'. Change server.auth.password in production.");
                 }
 
                 cfg.routes.before("/api/*", ctx -> {
-                    var authResult = basicAuthenticator.authenticate(ctx);
+                    if (isPublicAuthPath(ctx.path(), oidcCallbackPath)) {
+                        if (sessionAuthenticator != null && hasSessionCookie(ctx, sessionConfig.getCookieName())) {
+                            var sessionResult = sessionAuthenticator.authenticate(ctx);
+                            if (sessionResult.success()) {
+                                SecurityContext.setPrincipal(ctx, sessionResult.principal());
+                                new RequestContextMdcFilter().handle(ctx);
+                            }
+                        }
+                        return;
+                    }
+
+                    var authHolder = resolveAuthentication(ctx, sessionAuthenticator, basicCompatibilityEnabled ? basicAuthenticator : null, sessionConfig.getCookieName());
+                    var authResult = authHolder.result();
                     if (!authResult.success()) {
                         // 1.8 - emit LOGIN_FAILED
                         auditLogger.log(SecurityContext.audit(ctx)
                                 .action(AuditEvent.ACTION_LOGIN_FAILED)
                                 .resourceType(AuditEvent.RT_AUTH)
                                 .userId(authResult.attemptedUserId() != null ? authResult.attemptedUserId() : "anonymous")
-                                .authMethod("basic")
+                                .authMethod(authHolder.method())
                                 .details(Map.of("reason", authResult.failureReason(), "path", ctx.path()))
                                 .build());
 
-                        ctx.status(401)
-                                .header("WWW-Authenticate", authResult.challengeHeader())
-                                .json(Map.of("error", "Unauthorized"));
+                        ctx.status(401);
+                        if (authResult.challengeHeader() != null) {
+                            ctx.header("WWW-Authenticate", authResult.challengeHeader());
+                        }
+                        ctx.json(Map.of("error", "Unauthorized"));
                         ctx.skipRemainingHandlers();
                     } else {
                         SecurityContext.setPrincipal(ctx, authResult.principal());
                         new RequestContextMdcFilter().handle(ctx);
-                        // 1.8 - emit LOGIN success (once per request, not once per session)
-                        auditLogger.log(SecurityContext.audit(ctx)
-                                .action(AuditEvent.ACTION_LOGIN)
-                                .resourceType(AuditEvent.RT_AUTH)
-                                .details(Map.of("path", ctx.path()))
-                                .build());
+                        if (isMutatingMethod(ctx.method().name()) && SecurityContext.session(ctx) != null) {
+                            String expectedCsrf = SecurityContext.csrfToken(ctx);
+                            String suppliedCsrf = ctx.header("X-CSRF-Token");
+                            if (expectedCsrf == null || !expectedCsrf.equals(suppliedCsrf)) {
+                                ctx.status(403).json(Map.of("error", "csrf_required"));
+                                ctx.skipRemainingHandlers();
+                                return;
+                            }
+                        }
+                        if ("basic".equals(authHolder.method())) {
+                            auditLogger.log(SecurityContext.audit(ctx)
+                                    .action(AuditEvent.ACTION_LOGIN)
+                                    .resourceType(AuditEvent.RT_AUTH)
+                                    .details(Map.of("path", ctx.path()))
+                                    .build());
+                        }
                     }
                 });
                 cfg.routes.before("/ws/*", ctx -> {
-                    var authResult = basicAuthenticator.authenticate(ctx);
+                    var authResult = resolveAuthentication(ctx, sessionAuthenticator, basicCompatibilityEnabled ? basicAuthenticator : null, sessionConfig.getCookieName()).result();
                     if (!authResult.success()) {
-                        ctx.status(401)
-                                .header("WWW-Authenticate", authResult.challengeHeader())
-                                .json(Map.of("error", "Unauthorized"));
+                        ctx.status(401);
+                        if (authResult.challengeHeader() != null) {
+                            ctx.header("WWW-Authenticate", authResult.challengeHeader());
+                        }
+                        ctx.json(Map.of("error", "Unauthorized"));
                         ctx.skipRemainingHandlers();
                     } else {
                         SecurityContext.setPrincipal(ctx, authResult.principal());
                         new RequestContextMdcFilter().handle(ctx);
                     }
                 });
-                log.info("Basic auth ENABLED for /api/* and /ws/*");
+                log.info("Auth enabled for /api/* and /ws/* with provider={} basicCompatibility={}", authProvider, basicCompatibilityEnabled);
             }
 
             // ── Routes ────────────────────────────────────────────────────
@@ -318,6 +396,16 @@ public class EventLensServer {
 
             // OpenAPI (5.2)
             cfg.routes.get("/api/v1/openapi.json", openApiRoutes::spec);
+
+            if (authRoutes != null) {
+                cfg.routes.get("/api/v1/auth/session", authRoutes::session);
+                cfg.routes.post("/api/v1/auth/logout", authRoutes::logout);
+                cfg.routes.post("/api/v1/auth/login/basic", authRoutes::createBasicSession);
+            }
+            if (oidcRoutes != null) {
+                cfg.routes.get("/api/v1/auth/login/oidc", oidcRoutes::start);
+                cfg.routes.get(v5AuthConfig.getOidc().getRedirectPath(), oidcRoutes::callback);
+            }
 
             // Aggregates (v1)
             cfg.routes.get("/api/v1/aggregates/search", aggregateRoutes::search);
@@ -456,6 +544,12 @@ public class EventLensServer {
                     }
                 },
                 () -> {
+                    try {
+                        metadataDatabase.close();
+                    } catch (Exception ignored) {
+                    }
+                },
+                () -> {
                     if (reader instanceof AutoCloseable closeable) {
                         closeable.close();
                     }
@@ -466,6 +560,20 @@ public class EventLensServer {
 
     public void stop() {
         app.stop();
+        try {
+            exportService.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            metadataDatabase.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            if (reader instanceof AutoCloseable closeable) {
+                closeable.close();
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     public Javalin getApp() {
@@ -477,5 +585,41 @@ public class EventLensServer {
         ctx.header("Sunset", "2026-01-01");
         ctx.header("Link", "<" + successor + ">; rel=\"successor-version\"");
     }
-}
 
+    private static boolean isPublicAuthPath(String path, String oidcCallbackPath) {
+        return "/api/v1/auth/session".equals(path)
+                || "/api/v1/auth/logout".equals(path)
+                || "/api/v1/auth/login/basic".equals(path)
+                || "/api/v1/auth/login/oidc".equals(path)
+                || oidcCallbackPath.equals(path);
+    }
+
+    private static boolean hasSessionCookie(io.javalin.http.Context ctx, String cookieName) {
+        String value = ctx.cookie(cookieName);
+        return value != null && !value.isBlank();
+    }
+
+    private static boolean isMutatingMethod(String method) {
+        return "POST".equalsIgnoreCase(method)
+                || "PUT".equalsIgnoreCase(method)
+                || "PATCH".equalsIgnoreCase(method)
+                || "DELETE".equalsIgnoreCase(method);
+    }
+
+    private static AuthenticationResultHolder resolveAuthentication(
+            io.javalin.http.Context ctx,
+            SessionAuthenticator sessionAuthenticator,
+            BasicAuthenticator basicAuthenticator,
+            String sessionCookieName) {
+        if (sessionAuthenticator != null && hasSessionCookie(ctx, sessionCookieName)) {
+            return new AuthenticationResultHolder("session", sessionAuthenticator.authenticate(ctx));
+        }
+        if (basicAuthenticator != null) {
+            return new AuthenticationResultHolder("basic", basicAuthenticator.authenticate(ctx));
+        }
+        return new AuthenticationResultHolder("session", io.eventlens.api.security.AuthenticationResult.failure(null, "missing_session", null));
+    }
+
+    private record AuthenticationResultHolder(String method, io.eventlens.api.security.AuthenticationResult result) {
+    }
+}

@@ -25,7 +25,37 @@ import {
 } from '../demo/demoData';
 import { isDemoMode } from '../demo/demoMode';
 
-const api = axios.create({ baseURL: '/api' });
+const api = axios.create({
+    baseURL: '/api',
+    withCredentials: true,
+});
+
+let csrfToken: string | null = null;
+
+api.interceptors.request.use(config => {
+    const method = (config.method ?? 'get').toUpperCase();
+    if (csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        config.headers = config.headers ?? {};
+        config.headers['X-CSRF-Token'] = csrfToken;
+    }
+    return config;
+});
+
+export interface AuthPrincipal {
+    userId: string;
+    displayName: string;
+    authMethod: string;
+    roles: string[];
+}
+
+export interface AuthSessionResponse {
+    authenticated: boolean;
+    principal?: AuthPrincipal;
+    returnHash?: string;
+    provider?: string;
+    basicLoginEnabled?: boolean;
+    csrfToken?: string;
+}
 
 function delay(ms: number) {
     return new Promise<void>(resolve => {
@@ -39,6 +69,16 @@ function withOptionalSource(path: string, source?: string | null) {
     }
     const separator = path.includes('?') ? '&' : '?';
     return `${path}${separator}source=${encodeURIComponent(source)}`;
+}
+
+function encodeBasicCredentials(username: string, password: string) {
+    const credentials = `${username}:${password}`;
+    const bytes = new TextEncoder().encode(credentials);
+    let binary = '';
+    bytes.forEach(byte => {
+        binary += String.fromCharCode(byte);
+    });
+    return btoa(binary);
 }
 
 export type {
@@ -154,6 +194,47 @@ export const getHealth = async () => {
         return demoHealth();
     }
     return api.get('/health').then(r => r.data);
+};
+
+export const getAuthSession = async () => {
+    if (isDemoMode()) {
+        return {
+            authenticated: true,
+            principal: {
+                userId: 'demo-user',
+                displayName: 'Demo User',
+                authMethod: 'demo',
+                roles: ['demo'],
+            },
+        } satisfies AuthSessionResponse;
+    }
+    return api.get<AuthSessionResponse>('/v1/auth/session').then(r => r.data);
+};
+
+export const loginWithBasicSession = async (username: string, password: string, returnHash: string) => {
+    return api.post<AuthSessionResponse>(
+        '/v1/auth/login/basic',
+        { returnHash },
+        {
+            headers: {
+                Authorization: `Basic ${encodeBasicCredentials(username, password)}`,
+            },
+        }
+    ).then(r => r.data);
+};
+
+export const logoutSession = async () => {
+    if (isDemoMode()) {
+        return { authenticated: false } satisfies AuthSessionResponse;
+    }
+    return api.post<AuthSessionResponse>('/v1/auth/logout').then(r => r.data);
+};
+
+export const buildOidcLoginUrl = (returnHash: string) =>
+    `/api/v1/auth/login/oidc?returnHash=${encodeURIComponent(returnHash)}`;
+
+export const setCsrfToken = (value: string | null) => {
+    csrfToken = value;
 };
 
 export const getDatasources = async () => {

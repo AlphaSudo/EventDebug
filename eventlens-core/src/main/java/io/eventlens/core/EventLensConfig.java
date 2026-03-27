@@ -129,9 +129,66 @@ public class EventLensConfig {
 
     public static class SecurityFeaturesConfig {
         private MetadataConfig metadata = new MetadataConfig();
+        private AuthProviderConfig auth = new AuthProviderConfig();
 
         public MetadataConfig getMetadata() { return metadata; }
         public void setMetadata(MetadataConfig metadata) { this.metadata = metadata; }
+        public AuthProviderConfig getAuth() { return auth; }
+        public void setAuth(AuthProviderConfig auth) { this.auth = auth; }
+    }
+
+    public static class AuthProviderConfig {
+        private String provider = "disabled";
+        private SessionConfig session = new SessionConfig();
+        private OidcConfig oidc = new OidcConfig();
+
+        public String getProvider() { return provider; }
+        public void setProvider(String provider) { this.provider = provider; }
+        public SessionConfig getSession() { return session; }
+        public void setSession(SessionConfig session) { this.session = session; }
+        public OidcConfig getOidc() { return oidc; }
+        public void setOidc(OidcConfig oidc) { this.oidc = oidc; }
+    }
+
+    public static class SessionConfig {
+        private String cookieName = "__Host-eventlens_session";
+        private int idleTimeoutSeconds = 1_800;
+        private int absoluteTimeoutSeconds = 28_800;
+        private boolean secureCookie = true;
+        private String sameSite = "Lax";
+
+        public String getCookieName() { return cookieName; }
+        public void setCookieName(String cookieName) { this.cookieName = cookieName; }
+        public int getIdleTimeoutSeconds() { return idleTimeoutSeconds; }
+        public void setIdleTimeoutSeconds(int idleTimeoutSeconds) { this.idleTimeoutSeconds = idleTimeoutSeconds; }
+        public int getAbsoluteTimeoutSeconds() { return absoluteTimeoutSeconds; }
+        public void setAbsoluteTimeoutSeconds(int absoluteTimeoutSeconds) { this.absoluteTimeoutSeconds = absoluteTimeoutSeconds; }
+        public boolean isSecureCookie() { return secureCookie; }
+        public void setSecureCookie(boolean secureCookie) { this.secureCookie = secureCookie; }
+        public String getSameSite() { return sameSite; }
+        public void setSameSite(String sameSite) { this.sameSite = sameSite; }
+    }
+
+    public static class OidcConfig {
+        private String issuer;
+        private String clientId;
+        private String clientSecret;
+        private String redirectPath = "/api/v1/auth/callback";
+        private String postLogoutRedirectPath = "/";
+        private List<String> scopes = List.of("openid", "profile", "email");
+
+        public String getIssuer() { return issuer; }
+        public void setIssuer(String issuer) { this.issuer = issuer; }
+        public String getClientId() { return clientId; }
+        public void setClientId(String clientId) { this.clientId = clientId; }
+        public String getClientSecret() { return clientSecret; }
+        public void setClientSecret(String clientSecret) { this.clientSecret = clientSecret; }
+        public String getRedirectPath() { return redirectPath; }
+        public void setRedirectPath(String redirectPath) { this.redirectPath = redirectPath; }
+        public String getPostLogoutRedirectPath() { return postLogoutRedirectPath; }
+        public void setPostLogoutRedirectPath(String postLogoutRedirectPath) { this.postLogoutRedirectPath = postLogoutRedirectPath; }
+        public List<String> getScopes() { return scopes; }
+        public void setScopes(List<String> scopes) { this.scopes = scopes == null ? List.of() : scopes; }
     }
 
     public static class MetadataConfig {
