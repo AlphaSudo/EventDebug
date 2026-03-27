@@ -25,6 +25,7 @@ import io.eventlens.core.engine.*;
 import io.eventlens.core.exception.QueryTimeoutException;
 import io.eventlens.core.metadata.MetadataDatabase;
 import io.eventlens.core.pii.PiiMasker;
+import io.eventlens.core.pii.SensitiveDataProtector;
 import io.eventlens.core.plugin.PluginManager;
 import io.eventlens.core.security.AuthorizationService;
 import io.eventlens.core.security.Principal;
@@ -122,9 +123,10 @@ public class EventLensServer {
         // ── 1.9 PII Masker ────────────────────────────────────────────────
         final PiiMasker piiMasker = new PiiMasker(
                 config.getDataProtection().getPii());
+        final SensitiveDataProtector sensitiveDataProtector = new SensitiveDataProtector(piiMasker);
 
         // ── 2.6 Async Export ───────────────────────────────────────────────
-        this.exportService = new ExportService(reader, auditLogger, config.getExport());
+        this.exportService = new ExportService(reader, auditLogger, config.getExport(), sensitiveDataProtector);
 
         // 4.1 Metrics: JVM binders + per-request instrumentation
         EventLensMetrics.initJvmMetrics(EventLensMetrics.registry);
@@ -148,18 +150,19 @@ public class EventLensServer {
         // ── Route handler instances ───────────────────────────────────────
         var aggregateRoutes    = new AggregateRoutes(sourceRegistry, auditLogger, queryCache,
                 Duration.ofSeconds(config.getQueryCache().getSearchTtlSeconds()), routeAuthorizer);
-        var timelineRoutes     = new TimelineRoutes(sourceRegistry, auditLogger, piiMasker, queryCache,
+        var timelineRoutes     = new TimelineRoutes(sourceRegistry, auditLogger, sensitiveDataProtector, queryCache,
                 Duration.ofSeconds(config.getQueryCache().getTimelineTtlSeconds()), routeAuthorizer);
         var datasourceRoutes   = new DatasourceRoutes(sourceRegistry, routeAuthorizer);
         var pluginRoutes       = new PluginRoutes(sourceRegistry, routeAuthorizer);
         var statisticsRoutes   = new StatisticsRoutes(sourceRegistry, routeAuthorizer);
         var bisectRoutes       = new BisectRoutes(bisectEngine, routeAuthorizer);
-        var anomalyRoutes      = new AnomalyRoutes(sourceRegistry, config.getAnomaly(), auditLogger, routeAuthorizer);
-        var exportRoutes       = new ExportRoutes(exportEngine, auditLogger, routeAuthorizer);
+        var anomalyRoutes      = new AnomalyRoutes(sourceRegistry, config.getAnomaly(), auditLogger, routeAuthorizer, sensitiveDataProtector);
+        var exportRoutes       = new ExportRoutes(sourceRegistry, exportEngine, auditLogger, routeAuthorizer, sensitiveDataProtector);
         var asyncExportRoutes  = new AsyncExportRoutes(exportService, routeAuthorizer);
         var healthRoutes       = new HealthRoutes(reader, config.getVersion());
         var metricsRoutes      = new MetricsRoutes(routeAuthorizer);
         var openApiRoutes      = new OpenApiRoutes(routeAuthorizer);
+        var piiRevealRoutes    = new PiiRevealRoutes(sourceRegistry, auditLogger, routeAuthorizer);
         var liveTailWs         = new LiveTailWebSocket(sourceRegistry, pluginManager, auditLogger, defaultSourceId, sourceStreamBindings);
 
         var authConfig = config.getServer().getAuth();
@@ -482,6 +485,7 @@ public class EventLensServer {
 
             // Export (v1 + legacy)
             cfg.routes.get("/api/v1/aggregates/{id}/export", exportRoutes::export);
+            cfg.routes.post("/api/v1/aggregates/{id}/events/{seq}/reveal", piiRevealRoutes::revealEvent);
             cfg.routes.get("/api/aggregates/{id}/export", ctx -> {
                 markDeprecated(ctx, "/api/v1/aggregates/" + ctx.pathParam("id") + "/export");
                 exportRoutes.export(ctx);

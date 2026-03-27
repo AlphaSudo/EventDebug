@@ -1,8 +1,5 @@
 package io.eventlens.api.routes;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import io.eventlens.api.cache.QueryResultCache;
 import io.eventlens.api.http.ConditionalGet;
 import io.eventlens.api.http.SecurityContext;
@@ -14,7 +11,7 @@ import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.model.AggregateTimeline;
 import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.pagination.CursorCodec;
-import io.eventlens.core.pii.PiiMasker;
+import io.eventlens.core.pii.SensitiveDataProtector;
 import io.eventlens.core.security.Permission;
 import io.javalin.http.Context;
 
@@ -31,28 +28,24 @@ public class TimelineRoutes {
 
     private final SourceRegistry sourceRegistry;
     private final AuditLogger auditLogger;
-    private final PiiMasker piiMasker;
+    private final SensitiveDataProtector sensitiveDataProtector;
     private final QueryResultCache queryCache;
     private final Duration timelineTtl;
-    private final ObjectMapper mapper;
     private final RouteAuthorizer routeAuthorizer;
 
     public TimelineRoutes(
             SourceRegistry sourceRegistry,
             AuditLogger auditLogger,
-            PiiMasker piiMasker,
+            SensitiveDataProtector sensitiveDataProtector,
             QueryResultCache queryCache,
             Duration timelineTtl,
             RouteAuthorizer routeAuthorizer) {
         this.sourceRegistry = sourceRegistry;
         this.auditLogger = auditLogger;
-        this.piiMasker = piiMasker;
+        this.sensitiveDataProtector = sensitiveDataProtector;
         this.queryCache = queryCache;
         this.timelineTtl = timelineTtl;
         this.routeAuthorizer = routeAuthorizer;
-        this.mapper = new ObjectMapper()
-                .findAndRegisterModules()
-                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
     public void getTimeline(Context ctx) {
@@ -119,7 +112,7 @@ public class TimelineRoutes {
         if (!routeAuthorizer.require(ctx, Permission.VIEW_REPLAY, source.id(), aggregateType)) {
             return;
         }
-        ctx.json(transitions);
+        ctx.json(sensitiveDataProtector.maskTransitions(transitions));
     }
 
     public void replayTo(Context ctx) {
@@ -134,7 +127,7 @@ public class TimelineRoutes {
         if (!routeAuthorizer.require(ctx, Permission.VIEW_REPLAY, source.id(), aggregateType)) {
             return;
         }
-        ctx.json(replay);
+        ctx.json(sensitiveDataProtector.maskReplayResult(replay));
     }
 
     public void transitions(Context ctx) {
@@ -148,7 +141,7 @@ public class TimelineRoutes {
         if (!routeAuthorizer.require(ctx, Permission.VIEW_REPLAY, source.id(), aggregateType)) {
             return;
         }
-        ctx.json(transitions);
+        ctx.json(sensitiveDataProtector.maskTransitions(transitions));
     }
 
     private TimelineEnvelope buildTimelineEnvelope(
@@ -175,7 +168,7 @@ public class TimelineRoutes {
             timeline = source.replayEngine().buildTimeline(aggregateId, limit, offset);
         }
 
-        AggregateTimeline masked = maskTimeline(timeline);
+        AggregateTimeline masked = sensitiveDataProtector.maskTimeline(timeline);
         AggregateTimeline shaped = "metadata".equals(fields) ? metadataOnly(masked) : masked;
         return new TimelineEnvelope(shaped, hasMore, nextCursor);
     }
@@ -209,48 +202,6 @@ public class TimelineRoutes {
                 timeline.aggregateType(),
                 events,
                 timeline.totalEvents());
-    }
-
-    private AggregateTimeline maskTimeline(AggregateTimeline timeline) {
-        if (timeline == null || timeline.events() == null) {
-            return timeline;
-        }
-
-        List<StoredEvent> maskedEvents = timeline.events().stream()
-                .map(this::maskEvent)
-                .toList();
-
-        return new AggregateTimeline(
-                timeline.aggregateId(),
-                timeline.aggregateType(),
-                maskedEvents,
-                timeline.totalEvents());
-    }
-
-    private StoredEvent maskEvent(StoredEvent event) {
-        if (event == null || event.payload() == null) {
-            return event;
-        }
-        try {
-            String raw = event.payload();
-            JsonNode tree = mapper.readTree(raw);
-            JsonNode maskedTree = piiMasker.mask(tree, raw);
-            if (maskedTree == tree) {
-                return event;
-            }
-            return new StoredEvent(
-                    event.eventId(),
-                    event.aggregateId(),
-                    event.aggregateType(),
-                    event.sequenceNumber(),
-                    event.eventType(),
-                    mapper.writeValueAsString(maskedTree),
-                    event.metadata(),
-                    event.timestamp(),
-                    event.globalPosition());
-        } catch (Exception e) {
-            return event;
-        }
     }
     private record TimelineEnvelope(AggregateTimeline timeline, boolean hasMore, String nextCursor) {
     }

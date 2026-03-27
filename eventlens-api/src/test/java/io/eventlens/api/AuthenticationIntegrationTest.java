@@ -311,6 +311,108 @@ class AuthenticationIntegrationTest {
         assertThat(response.body()).contains("\"source\":\"default\"");
     }
 
+    @Test
+    void timelineMasksSensitivePayloadsByDefault() throws Exception {
+        int port = freePort();
+        server = startServer(port, true);
+
+        var client = HttpClient.newHttpClient();
+        var request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/ORD-1001/timeline".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).contains("***@***.***");
+        assertThat(response.body()).doesNotContain("alice@example.com");
+    }
+
+    @Test
+    void exportMasksSensitivePayloadsByDefault() throws Exception {
+        int port = freePort();
+        server = startServer(port, true);
+
+        var client = HttpClient.newHttpClient();
+        var request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/ORD-1001/export?format=json".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).contains("***@***.***");
+        assertThat(response.body()).doesNotContain("alice@example.com");
+    }
+
+    @Test
+    void revealRequiresPermissionAndReasonThenReturnsUnmaskedPayload() throws Exception {
+        int port = freePort();
+        server = startServer(port, true, null, cfg -> {
+            cfg.getSecurity().getAuthorization().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setPrincipalRoles(Map.of("admin", List.of("pii-operator")));
+
+            var role = new EventLensConfig.RoleConfig();
+            role.setId("pii-operator");
+            role.setPermissions(List.of("SEARCH_AGGREGATES", "VIEW_TIMELINE", "REVEAL_PII"));
+            cfg.getSecurity().getAuthorization().setRoles(List.of(role));
+        });
+
+        var client = HttpClient.newHttpClient();
+
+        var missingReasonRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/ORD-1001/events/1/reveal".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .build();
+        HttpResponse<String> badRequest = client.send(missingReasonRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(badRequest.statusCode()).isEqualTo(400);
+
+        var allowedRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/ORD-1001/events/1/reveal".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"reason\":\"Investigating ticket SEC-123\"}"))
+                .build();
+        HttpResponse<String> allowed = client.send(allowedRequest, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(allowed.statusCode()).isEqualTo(200);
+        assertThat(allowed.body()).contains("alice@example.com");
+    }
+
+    @Test
+    void revealRejectsUserWithoutRevealPermission() throws Exception {
+        int port = freePort();
+        server = startServer(port, true, null, cfg -> {
+            cfg.getSecurity().getAuthorization().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setPrincipalRoles(Map.of("admin", List.of("reader")));
+
+            var role = new EventLensConfig.RoleConfig();
+            role.setId("reader");
+            role.setPermissions(List.of("SEARCH_AGGREGATES", "VIEW_TIMELINE"));
+            cfg.getSecurity().getAuthorization().setRoles(List.of(role));
+        });
+
+        var client = HttpClient.newHttpClient();
+        var request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/ORD-1001/events/1/reveal".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"reason\":\"Need raw payload\"}"))
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.body()).contains("\"reason\":\"DENY_MISSING_PERMISSION\"");
+        assertThat(response.body()).contains("\"permission\":\"REVEAL_PII\"");
+    }
+
     private EventLensServer startServer(int port, boolean authEnabled) {
         return startServer(port, authEnabled, null, cfg -> {});
     }
@@ -327,12 +429,32 @@ class AuthenticationIntegrationTest {
         EventStoreReader reader = new EventStoreReader() {
             @Override
             public List<StoredEvent> getEvents(String aggregateId) {
-                return List.of();
+                if (!"ORD-1001".equals(aggregateId)) {
+                    return List.of();
+                }
+                return List.of(
+                        new StoredEvent(
+                                "evt-1", "ORD-1001", "Order", 1, "ORDER_CREATED",
+                                "{\"email\":\"alice@example.com\",\"status\":\"created\"}",
+                                "{\"source\":\"default\"}",
+                                Instant.parse("2026-01-01T00:00:00Z"),
+                                1L
+                        ),
+                        new StoredEvent(
+                                "evt-2", "ORD-1001", "Order", 2, "ORDER_CONFIRMED",
+                                "{\"status\":\"confirmed\"}",
+                                "{\"source\":\"default\"}",
+                                Instant.parse("2026-01-01T00:01:00Z"),
+                                2L
+                        )
+                );
             }
 
             @Override
             public List<StoredEvent> getEventsUpTo(String aggregateId, long maxSequence) {
-                return List.of();
+                return getEvents(aggregateId).stream()
+                        .filter(event -> event.sequenceNumber() <= maxSequence)
+                        .toList();
             }
 
             @Override
@@ -354,7 +476,7 @@ class AuthenticationIntegrationTest {
 
             @Override
             public long countEvents(String aggregateId) {
-                return 0;
+                return getEvents(aggregateId).size();
             }
 
             @Override
@@ -374,6 +496,7 @@ class AuthenticationIntegrationTest {
         cfg.getServer().getAuth().setUsername("admin");
         cfg.getServer().getAuth().setPassword("correct horse battery");
         cfg.getServer().getSecurity().getRateLimit().setEnabled(false);
+        cfg.getDataProtection().getPii().setEnabled(true);
         cfg.getSecurity().getMetadata().setEnabled(true);
         cfg.getSecurity().getMetadata().setJdbcUrl("jdbc:sqlite:" + tempDir.resolve("auth-" + port + ".db"));
         cfg.getSecurity().getAuth().getSession().setCookieName("eventlens_test_session");

@@ -8,6 +8,7 @@ import io.eventlens.core.InputValidator;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.AnomalyDetector;
+import io.eventlens.core.pii.SensitiveDataProtector;
 import io.eventlens.core.security.Permission;
 import io.javalin.http.Context;
 
@@ -28,16 +29,19 @@ public class AnomalyRoutes {
     private final AuditLogger auditLogger;
     private final Map<String, AnomalyDetector> detectors = new ConcurrentHashMap<>();
     private final RouteAuthorizer routeAuthorizer;
+    private final SensitiveDataProtector sensitiveDataProtector;
 
     public AnomalyRoutes(
             SourceRegistry sourceRegistry,
             EventLensConfig.AnomalyConfig anomalyConfig,
             AuditLogger auditLogger,
-            RouteAuthorizer routeAuthorizer) {
+            RouteAuthorizer routeAuthorizer,
+            SensitiveDataProtector sensitiveDataProtector) {
         this.sourceRegistry = sourceRegistry;
         this.anomalyConfig = anomalyConfig;
         this.auditLogger = auditLogger;
         this.routeAuthorizer = routeAuthorizer;
+        this.sensitiveDataProtector = sensitiveDataProtector;
     }
 
     /** GET /api/aggregates/{id}/anomalies */
@@ -58,7 +62,7 @@ public class AnomalyRoutes {
                         "source", source.id()))
                 .build());
 
-        ctx.json(result);
+        ctx.json(sensitiveDataProtector.maskAnomalies(result));
     }
 
     /** GET /api/anomalies/recent?limit=100 */
@@ -81,7 +85,7 @@ public class AnomalyRoutes {
                         "source", source.id()))
                 .build());
 
-        ctx.json(result);
+        ctx.json(sensitiveDataProtector.maskAnomalies(result));
     }
 
     private AnomalyDetector detectorFor(String sourceId, SourceRegistry.ResolvedSource source) {

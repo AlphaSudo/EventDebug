@@ -6,6 +6,7 @@ import io.eventlens.core.JsonUtil;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.model.StoredEvent;
+import io.eventlens.core.pii.SensitiveDataProtector;
 import io.eventlens.core.spi.EventStoreReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +28,7 @@ public final class ExportService implements AutoCloseable {
 
     private final EventStoreReader reader;
     private final AuditLogger auditLogger;
+    private final SensitiveDataProtector sensitiveDataProtector;
     private final ExportConfig cfg;
     private final Path exportDir;
     private final Semaphore concurrent;
@@ -34,9 +36,10 @@ public final class ExportService implements AutoCloseable {
     private final ScheduledExecutorService janitor;
     private final ConcurrentHashMap<String, ExportJob> jobs = new ConcurrentHashMap<>();
 
-    public ExportService(EventStoreReader reader, AuditLogger auditLogger, ExportConfig cfg) {
+    public ExportService(EventStoreReader reader, AuditLogger auditLogger, ExportConfig cfg, SensitiveDataProtector sensitiveDataProtector) {
         this.reader = reader;
         this.auditLogger = auditLogger;
+        this.sensitiveDataProtector = sensitiveDataProtector;
         this.cfg = cfg != null ? cfg : new ExportConfig();
         this.exportDir = Path.of(this.cfg.getDirectory());
         this.concurrent = new Semaphore(Math.max(1, this.cfg.getMaxConcurrent()));
@@ -111,12 +114,13 @@ public final class ExportService implements AutoCloseable {
                         if (batch.isEmpty()) break;
 
                         for (StoredEvent e : batch) {
+                            StoredEvent masked = sensitiveDataProtector.maskEvent(e);
                             w.write(e.sequenceNumber() + ",");
-                            w.write(csv(e.eventType()));
+                            w.write(csv(masked.eventType()));
                             w.write(",");
-                            w.write(csv(e.timestamp().toString()));
+                            w.write(csv(masked.timestamp().toString()));
                             w.write(",");
-                            w.write(csv(e.payload()));
+                            w.write(csv(masked.payload()));
                             w.write("\n");
                             processed++;
                             afterSeq = e.sequenceNumber();
@@ -142,7 +146,7 @@ public final class ExportService implements AutoCloseable {
                         if (batch.isEmpty()) break;
 
                         for (StoredEvent e : batch) {
-                            JsonUtil.mapper().writeValue(g, e);
+                            JsonUtil.mapper().writeValue(g, sensitiveDataProtector.maskEvent(e));
                             processed++;
                             afterSeq = e.sequenceNumber();
                         }
@@ -218,4 +222,3 @@ public final class ExportService implements AutoCloseable {
         janitor.shutdownNow();
     }
 }
-

@@ -28,6 +28,7 @@ public record AuditEvent(
     public static final String ACTION_VIEW_TIMELINE   = "VIEW_TIMELINE";
     public static final String ACTION_VIEW_ANOMALIES  = "VIEW_ANOMALIES";
     public static final String ACTION_EXPORT          = "EXPORT";
+    public static final String ACTION_REVEAL_PII      = "REVEAL_PII";
     public static final String ACTION_LOGIN           = "LOGIN";
     public static final String ACTION_LOGIN_FAILED    = "LOGIN_FAILED";
     public static final String ACTION_VIEW_LIVE_STREAM = "VIEW_LIVE_STREAM";

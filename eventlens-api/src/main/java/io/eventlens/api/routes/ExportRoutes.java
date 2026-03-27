@@ -1,14 +1,17 @@
 package io.eventlens.api.routes;
 
+import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.core.InputValidator;
 import io.eventlens.api.http.SecurityContext;
 import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.ExportEngine;
+import io.eventlens.core.pii.SensitiveDataProtector;
 import io.eventlens.core.security.Permission;
 import io.javalin.http.Context;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -19,14 +22,23 @@ import java.util.Map;
  */
 public class ExportRoutes {
 
+    private final SourceRegistry sourceRegistry;
     private final ExportEngine exportEngine;
     private final AuditLogger  auditLogger;
     private final RouteAuthorizer routeAuthorizer;
+    private final SensitiveDataProtector sensitiveDataProtector;
 
-    public ExportRoutes(ExportEngine exportEngine, AuditLogger auditLogger, RouteAuthorizer routeAuthorizer) {
+    public ExportRoutes(
+            SourceRegistry sourceRegistry,
+            ExportEngine exportEngine,
+            AuditLogger auditLogger,
+            RouteAuthorizer routeAuthorizer,
+            SensitiveDataProtector sensitiveDataProtector) {
+        this.sourceRegistry = sourceRegistry;
         this.exportEngine = exportEngine;
         this.auditLogger  = auditLogger;
         this.routeAuthorizer = routeAuthorizer;
+        this.sensitiveDataProtector = sensitiveDataProtector;
     }
 
     /** GET /api/aggregates/{id}/export?format=json|markdown|csv|junit */
@@ -41,10 +53,17 @@ public class ExportRoutes {
             default         -> ExportEngine.Format.JSON;
         };
 
-        String content = exportEngine.export(id, format);
-        if (!routeAuthorizer.require(ctx, Permission.EXPORT_AGGREGATE, null, null)) {
+        var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        List<io.eventlens.core.model.StoredEvent> events = source.reader().getEvents(id);
+        String aggregateType = events.isEmpty() ? null : events.getFirst().aggregateType();
+        if (!routeAuthorizer.require(ctx, Permission.EXPORT_AGGREGATE, source.id(), aggregateType)) {
             return;
         }
+        String content = exportEngine.export(
+                id,
+                events.stream().map(sensitiveDataProtector::maskEvent).toList(),
+                format == ExportEngine.Format.MARKDOWN ? sensitiveDataProtector.maskTransitions(source.replayEngine().replayFull(id)) : null,
+                format);
 
         String contentType = switch (format) {
             case MARKDOWN      -> "text/markdown";
@@ -58,7 +77,7 @@ public class ExportRoutes {
                 .action(AuditEvent.ACTION_EXPORT)
                 .resourceType(AuditEvent.RT_EXPORT)
                 .resourceId(id)
-                .details(Map.of("format", formatStr, "byteCount", content.length()))
+                .details(Map.of("format", formatStr, "byteCount", content.length(), "source", source.id()))
                 .build());
 
         ctx.contentType(contentType).result(content);
