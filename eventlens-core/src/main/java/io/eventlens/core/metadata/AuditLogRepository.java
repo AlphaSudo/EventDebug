@@ -47,11 +47,37 @@ public final class AuditLogRepository {
     }
 
     public List<AuditLogRecord> findRecent(int limit) {
+        return findRecent(limit, null, null);
+    }
+
+    public List<AuditLogRecord> findRecent(int limit, String action, String userId) {
         List<AuditLogRecord> results = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("SELECT * FROM audit_log");
+        List<Object> params = new ArrayList<>();
+        if (action != null || userId != null) {
+            sql.append(" WHERE ");
+            boolean appended = false;
+            if (action != null) {
+                sql.append("action = ?");
+                params.add(action);
+                appended = true;
+            }
+            if (userId != null) {
+                if (appended) {
+                    sql.append(" AND ");
+                }
+                sql.append("user_id = ?");
+                params.add(userId);
+            }
+        }
+        sql.append(" ORDER BY created_at DESC LIMIT ?");
+        params.add(limit);
+
         try (var connection = dataSource.getConnection();
-             PreparedStatement ps = connection.prepareStatement(
-                     "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?")) {
-            ps.setInt(1, limit);
+             PreparedStatement ps = connection.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) {
+                ps.setObject(i + 1, params.get(i));
+            }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     results.add(map(rs));

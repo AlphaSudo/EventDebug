@@ -3,8 +3,11 @@ package io.eventlens.core.audit;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import io.eventlens.core.metadata.AuditLogRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.time.Instant;
 
 /**
  * Writes structured audit entries to the {@code eventlens.audit} logger.
@@ -27,9 +30,15 @@ public final class AuditLogger {
 
     private final ObjectMapper mapper;
     private final boolean enabled;
+    private final AuditLogRepository auditLogRepository;
 
     public AuditLogger(boolean enabled) {
+        this(enabled, null);
+    }
+
+    public AuditLogger(boolean enabled, AuditLogRepository auditLogRepository) {
         this.enabled = enabled;
+        this.auditLogRepository = auditLogRepository;
         this.mapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -48,6 +57,13 @@ public final class AuditLogger {
             // Fallback — log a minimal message so at least something is recorded
             auditLog.info("{\"action\":\"{}\",\"requestId\":\"{}\",\"error\":\"serialisation failed\"}",
                     event.action(), event.requestId());
+        }
+        if (auditLogRepository != null) {
+            try {
+                auditLogRepository.append(event, event.timestamp() != null ? event.timestamp() : Instant.now());
+            } catch (Exception ex) {
+                auditLog.warn("Failed to persist audit event requestId={} action={}", event.requestId(), event.action(), ex);
+            }
         }
     }
 }

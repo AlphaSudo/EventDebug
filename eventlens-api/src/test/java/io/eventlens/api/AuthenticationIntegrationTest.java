@@ -413,6 +413,71 @@ class AuthenticationIntegrationTest {
         assertThat(response.body()).contains("\"permission\":\"REVEAL_PII\"");
     }
 
+    @Test
+    void auditEndpointReturnsPersistedAuditEntries() throws Exception {
+        int port = freePort();
+        server = startServer(port, true, null, cfg -> {
+            cfg.getSecurity().getAuthorization().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setPrincipalRoles(Map.of("admin", List.of("auditor")));
+
+            var role = new EventLensConfig.RoleConfig();
+            role.setId("auditor");
+            role.setPermissions(List.of("SEARCH_AGGREGATES", "VIEW_AUDIT_LOG"));
+            cfg.getSecurity().getAuthorization().setRoles(List.of(role));
+        });
+
+        var client = HttpClient.newHttpClient();
+        var searchRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/search?q=ord".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .GET()
+                .build();
+        HttpResponse<String> searchResponse = client.send(searchRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(searchResponse.statusCode()).isEqualTo(200);
+
+        var auditRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/audit?limit=10&action=SEARCH".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .GET()
+                .build();
+        HttpResponse<String> auditResponse = client.send(auditRequest, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(auditResponse.statusCode()).isEqualTo(200);
+        var auditJson = new ObjectMapper().readTree(auditResponse.body());
+        assertThat(auditJson.path("entries").isArray()).isTrue();
+        assertThat(auditJson.path("entries"))
+                .anySatisfy(node -> {
+                    assertThat(node.path("action").asText()).isEqualTo("SEARCH");
+                    assertThat(node.path("userId").asText()).isEqualTo("admin");
+                });
+    }
+
+    @Test
+    void auditEndpointRejectsUserWithoutAuditPermission() throws Exception {
+        int port = freePort();
+        server = startServer(port, true, null, cfg -> {
+            cfg.getSecurity().getAuthorization().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setPrincipalRoles(Map.of("admin", List.of("reader")));
+
+            var role = new EventLensConfig.RoleConfig();
+            role.setId("reader");
+            role.setPermissions(List.of("SEARCH_AGGREGATES"));
+            cfg.getSecurity().getAuthorization().setRoles(List.of(role));
+        });
+
+        var client = HttpClient.newHttpClient();
+        var request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/audit?limit=10".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.body()).contains("\"permission\":\"VIEW_AUDIT_LOG\"");
+    }
+
     private EventLensServer startServer(int port, boolean authEnabled) {
         return startServer(port, authEnabled, null, cfg -> {});
     }

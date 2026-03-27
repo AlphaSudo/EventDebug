@@ -17,6 +17,7 @@ public enum Permission {
     VIEW_PLUGINS,
     VIEW_STATISTICS,
     VIEW_METRICS,
+    VIEW_AUDIT_LOG,
     VIEW_OPENAPI,
     EXECUTE_BISECT;
 

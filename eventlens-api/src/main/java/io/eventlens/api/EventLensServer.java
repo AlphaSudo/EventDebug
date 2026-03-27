@@ -118,7 +118,8 @@ public class EventLensServer {
 
         // ── 1.8 Audit Logger ──────────────────────────────────────────────
         final AuditLogger auditLogger = new AuditLogger(
-                config.getAudit().isEnabled());
+                config.getAudit().isEnabled(),
+                this.metadataDatabase.isEnabled() ? this.metadataDatabase.repositories().auditLogs() : null);
 
         // ── 1.9 PII Masker ────────────────────────────────────────────────
         final PiiMasker piiMasker = new PiiMasker(
@@ -161,6 +162,7 @@ public class EventLensServer {
         var asyncExportRoutes  = new AsyncExportRoutes(exportService, routeAuthorizer);
         var healthRoutes       = new HealthRoutes(reader, config.getVersion());
         var metricsRoutes      = new MetricsRoutes(routeAuthorizer);
+        var auditRoutes        = new AuditRoutes(this.metadataDatabase.isEnabled() ? this.metadataDatabase.repositories().auditLogs() : null, routeAuthorizer);
         var openApiRoutes      = new OpenApiRoutes(routeAuthorizer);
         var piiRevealRoutes    = new PiiRevealRoutes(sourceRegistry, auditLogger, routeAuthorizer);
         var liveTailWs         = new LiveTailWebSocket(sourceRegistry, pluginManager, auditLogger, defaultSourceId, sourceStreamBindings);
@@ -401,6 +403,7 @@ public class EventLensServer {
 
             // Metrics (4.1)
             cfg.routes.get("/api/v1/metrics", metricsRoutes::metrics);
+            cfg.routes.get("/api/v1/audit", auditRoutes::recent);
 
             // OpenAPI (5.2)
             cfg.routes.get("/api/v1/openapi.json", openApiRoutes::spec);
