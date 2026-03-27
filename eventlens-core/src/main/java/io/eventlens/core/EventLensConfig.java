@@ -128,10 +128,13 @@ public class EventLensConfig {
     }
 
     public static class SecurityFeaturesConfig {
+        private boolean productionMode = false;
         private MetadataConfig metadata = new MetadataConfig();
         private AuthProviderConfig auth = new AuthProviderConfig();
         private AuthorizationConfig authorization = new AuthorizationConfig();
 
+        public boolean isProductionMode() { return productionMode; }
+        public void setProductionMode(boolean productionMode) { this.productionMode = productionMode; }
         public MetadataConfig getMetadata() { return metadata; }
         public void setMetadata(MetadataConfig metadata) { this.metadata = metadata; }
         public AuthProviderConfig getAuth() { return auth; }

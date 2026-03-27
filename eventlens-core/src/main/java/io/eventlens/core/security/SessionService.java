@@ -97,6 +97,10 @@ public final class SessionService {
         return sessionRepository.deleteExpired(clock.instant());
     }
 
+    public int activeSessionCount() {
+        return sessionRepository.countActive(clock.instant());
+    }
+
     private static boolean isExpired(SessionRecord session, Instant now) {
         return !session.idleExpiresAt().isAfter(now) || !session.absoluteExpiresAt().isAfter(now);
     }

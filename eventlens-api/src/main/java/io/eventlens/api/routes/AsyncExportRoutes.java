@@ -3,6 +3,7 @@ package io.eventlens.api.routes;
 import io.eventlens.api.export.ExportJob;
 import io.eventlens.api.export.ExportService;
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.core.InputValidator;
 import io.eventlens.core.security.Permission;
@@ -50,6 +51,7 @@ public final class AsyncExportRoutes {
                         "requestId", SecurityContext.requestId(ctx),
                         "userAgent", ctx.userAgent() != null ? ctx.userAgent() : "unknown"
                 ));
+        EventLensMetrics.recordSensitiveAction("export_async", "started");
 
         ctx.status(202).json(Map.of(
                 "exportId", job.exportId(),
@@ -131,7 +133,9 @@ public final class AsyncExportRoutes {
         ctx.contentType(contentType);
         try {
             ctx.result(Files.newInputStream(file));
+            EventLensMetrics.recordSensitiveAction("export_async_download", "success");
         } catch (Exception e) {
+            EventLensMetrics.recordSensitiveAction("export_async_download", "failure");
             ctx.status(500).json(Map.of("error", "download_failed", "message", e.getMessage()));
         }
     }

@@ -14,6 +14,7 @@ import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.ToDoubleFunction;
 
 public final class EventLensMetrics {
 
@@ -28,6 +29,8 @@ public final class EventLensMetrics {
     public static final Gauge websocketConnections = Gauge.builder("eventlens_websocket_connections", websocketConnectionsValue, AtomicInteger::get)
             .description("Active WebSocket connections")
             .register(registry);
+
+    private static final AtomicInteger securityMetricsBound = new AtomicInteger(0);
 
     private EventLensMetrics() {
     }
@@ -65,5 +68,64 @@ public final class EventLensMetrics {
     public static void setWebsocketConnections(int count) {
         websocketConnectionsValue.set(Math.max(0, count));
     }
-}
 
+    public static void recordAuthAttempt(String method, String outcome) {
+        Counter.builder("eventlens_security_auth_attempts_total")
+                .description("Authentication attempts by method and outcome")
+                .tags("method", normalize(method), "outcome", normalize(outcome))
+                .register(registry)
+                .increment();
+    }
+
+    public static void recordAuthorizationDenied(String permission, String reason) {
+        Counter.builder("eventlens_security_authz_denied_total")
+                .description("Authorization denials by permission and reason")
+                .tags("permission", normalize(permission), "reason", normalize(reason))
+                .register(registry)
+                .increment();
+    }
+
+    public static void recordSessionLifecycle(String action) {
+        Counter.builder("eventlens_security_sessions_total")
+                .description("Session lifecycle events")
+                .tags("action", normalize(action))
+                .register(registry)
+                .increment();
+    }
+
+    public static void bindActiveSessionsGauge(ToDoubleFunction<Object> valueFunction, Object stateObject) {
+        if (securityMetricsBound.compareAndSet(0, 1)) {
+            Gauge.builder("eventlens_security_sessions_active", stateObject, valueFunction)
+                    .description("Active browser sessions backed by metadata storage")
+                    .register(registry);
+        }
+    }
+
+    public static void recordSensitiveAction(String action, String outcome) {
+        Counter.builder("eventlens_security_sensitive_actions_total")
+                .description("Sensitive actions such as export and PII reveal")
+                .tags("action", normalize(action), "outcome", normalize(outcome))
+                .register(registry)
+                .increment();
+    }
+
+    public static void recordApiKeyLifecycle(String action) {
+        Counter.builder("eventlens_security_api_keys_total")
+                .description("API key lifecycle events")
+                .tags("action", normalize(action))
+                .register(registry)
+                .increment();
+    }
+
+    public static void recordAuditWriteFailure(String sink) {
+        Counter.builder("eventlens_security_audit_write_failures_total")
+                .description("Audit persistence failures by sink")
+                .tags("sink", normalize(sink))
+                .register(registry)
+                .increment();
+    }
+
+    private static String normalize(String value) {
+        return value == null || value.isBlank() ? "unknown" : value;
+    }
+}

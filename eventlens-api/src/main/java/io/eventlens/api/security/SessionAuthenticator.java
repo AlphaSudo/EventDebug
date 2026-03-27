@@ -1,6 +1,7 @@
 package io.eventlens.api.security;
 
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.core.metadata.SessionRecord;
 import io.eventlens.core.security.Principal;
 import io.eventlens.core.security.SessionService;
@@ -31,6 +32,7 @@ public final class SessionAuthenticator implements RequestAuthenticator {
 
         Optional<SessionRecord> record = sessionService.touch(sessionId);
         if (record.isEmpty()) {
+            EventLensMetrics.recordSessionLifecycle("rejected");
             return AuthenticationResult.failure(null, "invalid_session", null);
         }
 

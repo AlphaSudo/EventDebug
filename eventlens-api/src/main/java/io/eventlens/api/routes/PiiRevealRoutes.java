@@ -1,6 +1,7 @@
 package io.eventlens.api.routes;
 
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.core.InputValidator;
@@ -33,6 +34,7 @@ public final class PiiRevealRoutes {
         RevealRequest request = ctx.bodyAsClass(RevealRequest.class);
         String reason = request != null ? request.reason : null;
         if (reason == null || reason.isBlank()) {
+            EventLensMetrics.recordSensitiveAction("reveal_pii", "rejected");
             ctx.status(400).json(Map.of("error", "reason_required"));
             return;
         }
@@ -43,6 +45,7 @@ public final class PiiRevealRoutes {
                 .reduce((left, right) -> right)
                 .orElse(null);
         if (event == null) {
+            EventLensMetrics.recordSensitiveAction("reveal_pii", "not_found");
             ctx.status(404).json(Map.of("error", "not_found", "message", "Event not found"));
             return;
         }
@@ -62,6 +65,7 @@ public final class PiiRevealRoutes {
                         "reason", reason
                 ))
                 .build());
+        EventLensMetrics.recordSensitiveAction("reveal_pii", "success");
 
         ctx.json(Map.of(
                 "event", event,

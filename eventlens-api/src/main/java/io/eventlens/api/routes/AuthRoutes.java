@@ -1,6 +1,7 @@
 package io.eventlens.api.routes;
 
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.security.BasicAuthenticator;
 import io.eventlens.api.security.CsrfTokens;
 import io.eventlens.core.EventLensConfig;
@@ -65,6 +66,7 @@ public final class AuthRoutes {
         String expectedCsrf = SecurityContext.csrfToken(ctx);
         String suppliedCsrf = ctx.header("X-CSRF-Token");
         if (expectedCsrf != null && !expectedCsrf.equals(suppliedCsrf)) {
+            EventLensMetrics.recordSessionLifecycle("logout_csrf_rejected");
             ctx.status(403).json(Map.of("error", "csrf_required"));
             return;
         }
@@ -72,6 +74,7 @@ public final class AuthRoutes {
         String sessionId = ctx.cookie(sessionConfig.getCookieName());
         if (sessionId != null && !sessionId.isBlank()) {
             sessionService.invalidate(sessionId);
+            EventLensMetrics.recordSessionLifecycle("invalidated");
         }
         expireCookie(ctx);
 
@@ -87,6 +90,7 @@ public final class AuthRoutes {
     public void createBasicSession(Context ctx) {
         var authResult = basicAuthenticator.authenticate(ctx);
         if (!authResult.success()) {
+            EventLensMetrics.recordAuthAttempt("basic", "failure");
             auditLogger.log(SecurityContext.audit(ctx)
                     .action(AuditEvent.ACTION_LOGIN_FAILED)
                     .resourceType(AuditEvent.RT_AUTH)
@@ -101,6 +105,7 @@ public final class AuthRoutes {
             return;
         }
 
+        EventLensMetrics.recordAuthAttempt("basic", "success");
         Principal principal = authResult.principal();
         String returnHash = sanitizeReturnHash(ctx.bodyAsClass(BasicSessionRequest.class).returnHash());
         String csrfToken = CsrfTokens.generate();
@@ -108,6 +113,7 @@ public final class AuthRoutes {
                 "returnHash", returnHash,
                 "csrfToken", csrfToken
         ));
+        EventLensMetrics.recordSessionLifecycle("created");
         setSessionCookie(ctx, session.sessionId());
         SecurityContext.setPrincipal(ctx, principal);
         SecurityContext.setSession(ctx, session);

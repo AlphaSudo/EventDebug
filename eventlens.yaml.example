@@ -51,6 +51,24 @@ ui:
 audit:
   enabled: true                # set to false to silence audit log entirely
 
+security:
+  production-mode: false       # set true for shared/prod deployments; blocks unsafe startup combinations
+  metadata:
+    enabled: false
+    jdbc-url: jdbc:sqlite:./data/eventlens-metadata.db
+  auth:
+    provider: disabled         # disabled | basic | oidc
+    session:
+      cookie-name: __Host-eventlens_session
+      idle-timeout-seconds: 1800
+      absolute-timeout-seconds: 28800
+      secure-cookie: true
+      same-site: Lax
+    api-keys:
+      enabled: false
+      header-name: X-API-Key
+      key-prefix: el
+
 # ── 1.9 PII Masking ───────────────────────────────────────────────────────────
 # Scans event payloads in API responses for common PII patterns and replaces
 # matching text with the configured mask string.

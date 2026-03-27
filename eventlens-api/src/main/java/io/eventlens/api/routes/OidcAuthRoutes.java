@@ -1,6 +1,7 @@
 package io.eventlens.api.routes;
 
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.security.CsrfTokens;
 import io.eventlens.api.security.oidc.OidcIdTokenValidator;
 import io.eventlens.api.security.oidc.OidcLoginStateService;
@@ -73,24 +74,28 @@ public final class OidcAuthRoutes {
         expireStateCookie(ctx);
 
         if (!safeEquals(state, cookieState)) {
+            EventLensMetrics.recordAuthAttempt("oidc", "failure");
             failCallback(ctx, "state_mismatch");
             return;
         }
 
         String providerError = ctx.queryParam("error");
         if (providerError != null && !providerError.isBlank()) {
+            EventLensMetrics.recordAuthAttempt("oidc", "failure");
             failCallback(ctx, providerError);
             return;
         }
 
         Optional<PendingOidcLogin> pending = loginStateService.consume(state);
         if (pending.isEmpty()) {
+            EventLensMetrics.recordAuthAttempt("oidc", "failure");
             failCallback(ctx, "missing_state");
             return;
         }
 
         String code = ctx.queryParam("code");
         if (code == null || code.isBlank()) {
+            EventLensMetrics.recordAuthAttempt("oidc", "failure");
             failCallback(ctx, "missing_code");
             return;
         }
@@ -118,6 +123,8 @@ public final class OidcAuthRoutes {
             }
 
             var session = sessionService.create(principal, attributes);
+            EventLensMetrics.recordAuthAttempt("oidc", "success");
+            EventLensMetrics.recordSessionLifecycle("created");
             setSessionCookie(ctx, session.sessionId());
 
             auditLogger.log(SecurityContext.audit(ctx)
@@ -130,6 +137,7 @@ public final class OidcAuthRoutes {
 
             ctx.redirect("/" + login.returnHash());
         } catch (RuntimeException e) {
+            EventLensMetrics.recordAuthAttempt("oidc", "failure");
             failCallback(ctx, "token_validation_failed");
         }
     }

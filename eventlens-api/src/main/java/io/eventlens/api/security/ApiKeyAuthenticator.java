@@ -1,5 +1,6 @@
 package io.eventlens.api.security;
 
+import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.core.metadata.ApiKeyRecord;
 import io.eventlens.core.security.ApiKeyService;
 import io.eventlens.core.security.Principal;
@@ -31,6 +32,7 @@ public final class ApiKeyAuthenticator implements RequestAuthenticator {
         }
 
         ApiKeyRecord apiKey = record.get();
+        EventLensMetrics.recordApiKeyLifecycle("used");
         Principal principal = new Principal(
                 apiKey.principalUserId(),
                 apiKey.principalUserId(),

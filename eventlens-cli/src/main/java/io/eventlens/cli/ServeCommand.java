@@ -73,6 +73,10 @@ public class ServeCommand implements Runnable {
         if (dbPassword != null) config.getDatasource().setPassword(dbPassword);
         if (tableName != null) config.getDatasource().setTable(tableName);
 
+        var validationIssues = ConfigValidator.validate(config);
+        validationIssues.stream()
+                .filter(issue -> issue.severity() == ConfigValidator.ValidationError.Severity.WARNING)
+                .forEach(issue -> log.warn("Config warning {}: {}", issue.path(), issue.message()));
         ConfigValidator.validateOrThrow(config);
         MetadataDatabase metadataDatabase = MetadataDatabase.open(
                 config.getSecurity() != null ? config.getSecurity().getMetadata() : null);

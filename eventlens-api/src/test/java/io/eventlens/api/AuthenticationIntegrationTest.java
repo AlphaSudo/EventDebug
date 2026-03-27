@@ -265,7 +265,7 @@ class AuthenticationIntegrationTest {
 
             var role = new EventLensConfig.RoleConfig();
             role.setId("datasource-reader");
-            role.setPermissions(List.of("VIEW_DATASOURCES"));
+            role.setPermissions(List.of("VIEW_DATASOURCES", "VIEW_METRICS"));
             cfg.getSecurity().getAuthorization().setRoles(List.of(role));
         });
 
@@ -600,6 +600,66 @@ class AuthenticationIntegrationTest {
                 .build();
         HttpResponse<String> searchResponse = client.send(searchRequest, HttpResponse.BodyHandlers.ofString());
         assertThat(searchResponse.statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void metricsExposeSecurityCountersAfterAuthAndAuthorizationFlows() throws Exception {
+        int port = freePort();
+        server = startServer(port, true, null, cfg -> {
+            cfg.getSecurity().getAuthorization().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setPrincipalRoles(Map.of("admin", List.of("datasource-reader")));
+
+            var role = new EventLensConfig.RoleConfig();
+            role.setId("datasource-reader");
+            role.setPermissions(List.of("VIEW_DATASOURCES"));
+            cfg.getSecurity().getAuthorization().setRoles(List.of(role));
+        });
+
+        var client = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+
+        var missingAuthRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/search?q=ord".formatted(port)))
+                .GET()
+                .build();
+        HttpResponse<String> missingAuthResponse = client.send(missingAuthRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(missingAuthResponse.statusCode()).isEqualTo(401);
+
+        var forbiddenRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/search?q=ord".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .GET()
+                .build();
+        HttpResponse<String> forbiddenResponse = client.send(forbiddenRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(forbiddenResponse.statusCode()).isEqualTo(403);
+
+        var loginRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/auth/login/basic".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"returnHash\":\"#/timeline\"}"))
+                .build();
+        HttpResponse<String> loginResponse = client.send(loginRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(loginResponse.statusCode()).isEqualTo(200);
+
+        server.stop();
+        int metricsPort = freePort();
+        server = startServer(metricsPort, false);
+
+        var metricsRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/metrics".formatted(metricsPort)))
+                .GET()
+                .build();
+        HttpResponse<String> metricsResponse = client.send(metricsRequest, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(metricsResponse.statusCode()).isEqualTo(200);
+        assertThat(metricsResponse.body()).contains("eventlens_security_auth_attempts_total");
+        assertThat(metricsResponse.body()).contains("method=\"basic\"");
+        assertThat(metricsResponse.body()).contains("outcome=\"failure\"");
+        assertThat(metricsResponse.body()).contains("outcome=\"success\"");
+        assertThat(metricsResponse.body()).contains("eventlens_security_authz_denied_total");
+        assertThat(metricsResponse.body()).contains("eventlens_security_sessions_total");
     }
 
     private EventLensServer startServer(int port, boolean authEnabled) {

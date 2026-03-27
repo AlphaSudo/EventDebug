@@ -93,6 +93,7 @@ public final class ConfigValidator {
         validateMetadata(config, issues);
         validateSecurityAuth(config, issues);
         validateAuthorization(config, issues);
+        validateProductionGuardrails(config, issues);
         validateLegacyDatasource(config, issues);
         validateDatasourceInstances(config.getDatasourcesOrLegacy(), issues);
         validateStreamInstances(config.getStreamsOrLegacy(), issues);
@@ -254,6 +255,7 @@ public final class ConfigValidator {
         }
 
         var auth = security.getAuth();
+        boolean productionMode = security.isProductionMode();
         String provider = auth.getProvider() == null ? "disabled" : auth.getProvider().trim().toLowerCase();
         if (!Set.of("disabled", "basic", "oidc").contains(provider)) {
             issues.add(error("security.auth.provider", "Must be one of: disabled, basic, oidc"));
@@ -288,6 +290,10 @@ public final class ConfigValidator {
                     && !session.isSecureCookie()) {
                 issues.add(error("security.auth.session.secure-cookie",
                         "Must be true for __Host- prefixed cookies"));
+            }
+            if (productionMode && ("basic".equals(provider) || "oidc".equals(provider)) && !session.isSecureCookie()) {
+                issues.add(error("security.auth.session.secure-cookie",
+                        "Must be true for browser sessions in production mode"));
             }
         }
 
@@ -344,6 +350,57 @@ public final class ConfigValidator {
                     }
                 }
             }
+        }
+
+        boolean legacyBasicEnabled = config.getServer() != null
+                && config.getServer().getAuth() != null
+                && config.getServer().getAuth().isEnabled();
+        boolean browserSessionEnabled = "basic".equals(provider) || "oidc".equals(provider);
+        boolean apiKeysEnabled = apiKeys != null && apiKeys.isEnabled();
+        boolean effectiveAuthEnabled = legacyBasicEnabled || browserSessionEnabled || apiKeysEnabled;
+        if (productionMode && !effectiveAuthEnabled) {
+            issues.add(error("security.production-mode",
+                    "Production mode requires at least one authentication mechanism (legacy basic auth, security.auth.provider, or API keys)"));
+        }
+
+        if (productionMode
+                && config.getAudit() != null
+                && !config.getAudit().isEnabled()
+                && (browserSessionEnabled
+                || apiKeysEnabled
+                || (config.getDataProtection() != null
+                    && config.getDataProtection().getPii() != null
+                    && config.getDataProtection().getPii().isEnabled())
+                || (config.getSecurity() != null
+                    && config.getSecurity().getAuthorization() != null
+                    && config.getSecurity().getAuthorization().isEnabled()))) {
+            issues.add(error("audit.enabled",
+                    "Audit must be enabled in production mode when security features are enabled"));
+        }
+    }
+
+    private static void validateProductionGuardrails(EventLensConfig config, List<ValidationError> issues) {
+        var security = config.getSecurity();
+        if (security == null || !security.isProductionMode()) {
+            return;
+        }
+
+        var server = config.getServer();
+        if (server != null) {
+            var origins = server.getAllowedOrigins();
+            if (origins == null || origins.isEmpty()) {
+                issues.add(error("server.allowed-origins",
+                        "Production mode requires an explicit browser origin allowlist"));
+            } else if (origins.contains("*")) {
+                issues.add(error("server.allowed-origins",
+                        "Production mode does not allow wildcard origins"));
+            }
+        }
+
+        var metadata = security.getMetadata();
+        if (metadata != null && metadata.isEnabled() && "jdbc:sqlite::memory:".equalsIgnoreCase(metadata.getJdbcUrl())) {
+            issues.add(error("security.metadata.jdbc-url",
+                    "Production mode does not allow in-memory metadata storage"));
         }
     }
 

@@ -3,6 +3,7 @@ package io.eventlens.api.routes;
 import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.core.InputValidator;
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
@@ -64,6 +65,7 @@ public class ExportRoutes {
                 events.stream().map(sensitiveDataProtector::maskEvent).toList(),
                 format == ExportEngine.Format.MARKDOWN ? sensitiveDataProtector.maskTransitions(source.replayEngine().replayFull(id)) : null,
                 format);
+        EventLensMetrics.recordSensitiveAction("export", "success");
 
         String contentType = switch (format) {
             case MARKDOWN      -> "text/markdown";

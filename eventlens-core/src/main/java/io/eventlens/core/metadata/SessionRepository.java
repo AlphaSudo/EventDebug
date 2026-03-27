@@ -78,6 +78,21 @@ public final class SessionRepository {
         }
     }
 
+    public int countActive(Instant now) {
+        try (var connection = dataSource.getConnection();
+             PreparedStatement ps = connection.prepareStatement(
+                     "SELECT COUNT(*) FROM sessions WHERE idle_expires_at > ? AND absolute_expires_at > ?")) {
+            String value = now.toString();
+            ps.setString(1, value);
+            ps.setString(2, value);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to count active sessions", e);
+        }
+    }
+
     public void deleteById(String sessionId) {
         try (var connection = dataSource.getConnection();
              PreparedStatement ps = connection.prepareStatement("DELETE FROM sessions WHERE session_id = ?")) {

@@ -87,6 +87,32 @@ ui:
 audit:
   enabled: true
 
+security:
+  production-mode: false
+  metadata:
+    enabled: false
+    jdbc-url: jdbc:sqlite:./data/eventlens-metadata.db
+    wal-enabled: true
+    busy-timeout-ms: 5000
+    foreign-keys-enabled: true
+  auth:
+    provider: disabled
+    session:
+      cookie-name: __Host-eventlens_session
+      idle-timeout-seconds: 1800
+      absolute-timeout-seconds: 28800
+      secure-cookie: true
+      same-site: Lax
+    api-keys:
+      enabled: false
+      header-name: X-API-Key
+      key-prefix: el
+  authorization:
+    enabled: false
+    default-roles: []
+    principal-roles: {}
+    roles: []
+
 data-protection:
   pii:
     enabled: false
@@ -109,4 +135,3 @@ export:
   max-concurrent: 2
   max-events-per-export: 100000
   expire-after-seconds: 3600
-

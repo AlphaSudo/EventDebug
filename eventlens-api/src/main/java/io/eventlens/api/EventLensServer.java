@@ -121,7 +121,8 @@ public class EventLensServer {
         // ── 1.8 Audit Logger ──────────────────────────────────────────────
         final AuditLogger auditLogger = new AuditLogger(
                 config.getAudit().isEnabled(),
-                this.metadataDatabase.isEnabled() ? this.metadataDatabase.repositories().auditLogs() : null);
+                this.metadataDatabase.isEnabled() ? this.metadataDatabase.repositories().auditLogs() : null,
+                () -> EventLensMetrics.recordAuditWriteFailure("metadata"));
 
         // ── 1.9 PII Masker ────────────────────────────────────────────────
         final PiiMasker piiMasker = new PiiMasker(
@@ -162,7 +163,7 @@ public class EventLensServer {
         var anomalyRoutes      = new AnomalyRoutes(sourceRegistry, config.getAnomaly(), auditLogger, routeAuthorizer, sensitiveDataProtector);
         var exportRoutes       = new ExportRoutes(sourceRegistry, exportEngine, auditLogger, routeAuthorizer, sensitiveDataProtector);
         var asyncExportRoutes  = new AsyncExportRoutes(exportService, routeAuthorizer);
-        var healthRoutes       = new HealthRoutes(reader, config.getVersion());
+        var healthRoutes       = new HealthRoutes(reader, config.getVersion(), this.metadataDatabase);
         var metricsRoutes      = new MetricsRoutes(routeAuthorizer);
         var auditRoutes        = new AuditRoutes(this.metadataDatabase.isEnabled() ? this.metadataDatabase.repositories().auditLogs() : null, routeAuthorizer);
         var openApiRoutes      = new OpenApiRoutes(routeAuthorizer);
@@ -193,6 +194,9 @@ public class EventLensServer {
         var sessionService = this.metadataDatabase.isEnabled()
                 ? new SessionService(this.metadataDatabase.repositories().sessions(), sessionConfig)
                 : null;
+        if (sessionService != null) {
+            EventLensMetrics.bindActiveSessionsGauge(state -> ((SessionService) state).activeSessionCount(), sessionService);
+        }
         var sessionAuthenticator = sessionService != null
                 ? new SessionAuthenticator(sessionService, sessionConfig.getCookieName())
                 : null;
@@ -357,6 +361,7 @@ public class EventLensServer {
                             sessionConfig.getCookieName());
                     var authResult = authHolder.result();
                     if (!authResult.success()) {
+                        EventLensMetrics.recordAuthAttempt(authHolder.method(), "failure");
                         // 1.8 - emit LOGIN_FAILED
                         auditLogger.log(SecurityContext.audit(ctx)
                                 .action(AuditEvent.ACTION_LOGIN_FAILED)
@@ -373,6 +378,7 @@ public class EventLensServer {
                         ctx.json(Map.of("error", "Unauthorized"));
                         ctx.skipRemainingHandlers();
                     } else {
+                        EventLensMetrics.recordAuthAttempt(authHolder.method(), "success");
                         SecurityContext.setPrincipal(ctx, authResult.principal());
                         new RequestContextMdcFilter().handle(ctx);
                         if (isMutatingMethod(ctx.method().name()) && SecurityContext.session(ctx) != null) {
@@ -394,14 +400,16 @@ public class EventLensServer {
                     }
                 });
                 cfg.routes.before("/ws/*", ctx -> {
-                    var authResult = resolveAuthentication(
+                    var authHolder = resolveAuthentication(
                             ctx,
                             apiKeyAuthenticator,
                             sessionAuthenticator,
                             basicCompatibilityEnabled ? basicAuthenticator : null,
                             apiKeysConfig != null ? apiKeysConfig.getHeaderName() : "X-API-Key",
-                            sessionConfig.getCookieName()).result();
+                            sessionConfig.getCookieName());
+                    var authResult = authHolder.result();
                     if (!authResult.success()) {
+                        EventLensMetrics.recordAuthAttempt(authHolder.method(), "failure");
                         ctx.status(401);
                         if (authResult.challengeHeader() != null) {
                             ctx.header("WWW-Authenticate", authResult.challengeHeader());
@@ -409,6 +417,7 @@ public class EventLensServer {
                         ctx.json(Map.of("error", "Unauthorized"));
                         ctx.skipRemainingHandlers();
                     } else {
+                        EventLensMetrics.recordAuthAttempt(authHolder.method(), "success");
                         SecurityContext.setPrincipal(ctx, authResult.principal());
                         new RequestContextMdcFilter().handle(ctx);
                     }

@@ -1,6 +1,7 @@
 package io.eventlens.api.security;
 
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.core.security.AuthorizationDecision;
 import io.eventlens.core.security.AuthorizationDecisionReason;
 import io.eventlens.core.security.AuthorizationService;
@@ -28,6 +29,8 @@ public final class RouteAuthorizer {
         if (decision.allowed()) {
             return true;
         }
+
+        EventLensMetrics.recordAuthorizationDenied(permission.name(), decision.reason().name());
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("error", decision.reason() == AuthorizationDecisionReason.DENY_AUTH_REQUIRED ? "auth_required" : "forbidden");

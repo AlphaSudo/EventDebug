@@ -120,4 +120,35 @@ class ConfigValidatorTest {
         assertThat(issues.stream().anyMatch(i -> i.path().equals("security.authorization.default-roles[0]")
                 && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
     }
+
+    @Test
+    void productionModeRejectsWildcardOriginsAndMissingAuth() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().setProductionMode(true);
+        cfg.getServer().setAllowedOrigins(java.util.List.of("*"));
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("server.allowed-origins")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.production-mode")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
+
+    @Test
+    void productionModeRejectsInMemoryMetadataAndAuditDisabledSecurityFeatures() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().setProductionMode(true);
+        cfg.getServer().setAllowedOrigins(java.util.List.of("https://eventlens.example"));
+        cfg.getSecurity().getAuth().setProvider("oidc");
+        cfg.getSecurity().getAuth().getSession().setSecureCookie(true);
+        cfg.getSecurity().getMetadata().setEnabled(true);
+        cfg.getSecurity().getMetadata().setJdbcUrl("jdbc:sqlite::memory:");
+        cfg.getAudit().setEnabled(false);
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.metadata.jdbc-url")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("audit.enabled")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
 }

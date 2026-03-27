@@ -1,6 +1,7 @@
 package io.eventlens.api.routes;
 
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
@@ -66,6 +67,7 @@ public final class ApiKeyRoutes {
                 request.roles().stream().filter(role -> role != null && !role.isBlank()).map(String::trim).toList(),
                 blank(request.description()) ? null : request.description().trim(),
                 expiresAt);
+        EventLensMetrics.recordApiKeyLifecycle("created");
 
         auditLogger.log(SecurityContext.audit(ctx)
                 .action(AuditEvent.ACTION_CREATE_API_KEY)
@@ -97,6 +99,7 @@ public final class ApiKeyRoutes {
 
         String apiKeyId = ctx.pathParam("id");
         apiKeyService.revoke(apiKeyId, Instant.now());
+        EventLensMetrics.recordApiKeyLifecycle("revoked");
 
         auditLogger.log(SecurityContext.audit(ctx)
                 .action(AuditEvent.ACTION_REVOKE_API_KEY)

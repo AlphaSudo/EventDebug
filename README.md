@@ -614,8 +614,13 @@ EventLens primarily runs **read-only queries** against your event store. To keep
 - **Health endpoint**: `GET /api/health`
   - Verifies:
     - DB connectivity,
-    - event store statistics,
-    - Kafka consumer status (if enabled).
+    - metadata DB connectivity when v5 security metadata is enabled,
+    - event store statistics.
+- **Readiness endpoints**:
+  - `GET /api/v1/health/live`
+  - `GET /api/v1/health/ready`
+- **Metrics endpoint**: `GET /api/v1/metrics`
+  - Includes JVM metrics plus security counters for auth attempts, authz denials, session lifecycle, sensitive actions, API key lifecycle, and audit persistence failures.
 - **Logging**:
   - Controlled via `logback.xml` in `eventlens-core`.
   - Includes:
@@ -649,8 +654,15 @@ In containerized environments, direct logs to stdout/stderr and collect them via
 
 - Configure a **read-only** Postgres user in your environment.
 - Add or adjust indexes to match your event table shape.
-- Enable basic auth **behind an HTTPS reverse proxy** in `eventlens.yaml` for production deployments.
+- For shared environments, set `security.production-mode: true`, configure explicit `server.allowed-origins`, and keep metadata/audit enabled for OIDC, RBAC, API keys, or PII reveal.
+- Enable auth **behind an HTTPS reverse proxy** in `eventlens.yaml` for production deployments.
 - Build and run the Docker image alongside your own PostgreSQL/Kafka infrastructure, or reuse the provided `docker-compose.yml` for local debugging.
+
+## 8. Release Security Artifacts
+
+- Generate an OWASP dependency report with `./gradlew dependencyScan`
+- Generate a CycloneDX SBOM with `./gradlew sbom`
+- Release CI attaches these artifacts so operators can review the shipped dependency surface
 
 ---
 

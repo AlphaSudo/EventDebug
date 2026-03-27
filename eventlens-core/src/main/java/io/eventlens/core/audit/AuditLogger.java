@@ -31,14 +31,20 @@ public final class AuditLogger {
     private final ObjectMapper mapper;
     private final boolean enabled;
     private final AuditLogRepository auditLogRepository;
+    private final Runnable metadataFailureListener;
 
     public AuditLogger(boolean enabled) {
-        this(enabled, null);
+        this(enabled, null, null);
     }
 
     public AuditLogger(boolean enabled, AuditLogRepository auditLogRepository) {
+        this(enabled, auditLogRepository, null);
+    }
+
+    public AuditLogger(boolean enabled, AuditLogRepository auditLogRepository, Runnable metadataFailureListener) {
         this.enabled = enabled;
         this.auditLogRepository = auditLogRepository;
+        this.metadataFailureListener = metadataFailureListener;
         this.mapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -62,6 +68,9 @@ public final class AuditLogger {
             try {
                 auditLogRepository.append(event, event.timestamp() != null ? event.timestamp() : Instant.now());
             } catch (Exception ex) {
+                if (metadataFailureListener != null) {
+                    metadataFailureListener.run();
+                }
                 auditLog.warn("Failed to persist audit event requestId={} action={}", event.requestId(), event.action(), ex);
             }
         }
