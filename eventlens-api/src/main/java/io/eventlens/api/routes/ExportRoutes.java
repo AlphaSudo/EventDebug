@@ -2,9 +2,11 @@ package io.eventlens.api.routes;
 
 import io.eventlens.core.InputValidator;
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.ExportEngine;
+import io.eventlens.core.security.Permission;
 import io.javalin.http.Context;
 
 import java.util.Map;
@@ -19,10 +21,12 @@ public class ExportRoutes {
 
     private final ExportEngine exportEngine;
     private final AuditLogger  auditLogger;
+    private final RouteAuthorizer routeAuthorizer;
 
-    public ExportRoutes(ExportEngine exportEngine, AuditLogger auditLogger) {
+    public ExportRoutes(ExportEngine exportEngine, AuditLogger auditLogger, RouteAuthorizer routeAuthorizer) {
         this.exportEngine = exportEngine;
         this.auditLogger  = auditLogger;
+        this.routeAuthorizer = routeAuthorizer;
     }
 
     /** GET /api/aggregates/{id}/export?format=json|markdown|csv|junit */
@@ -38,6 +42,9 @@ public class ExportRoutes {
         };
 
         String content = exportEngine.export(id, format);
+        if (!routeAuthorizer.require(ctx, Permission.EXPORT_AGGREGATE, null, null)) {
+            return;
+        }
 
         String contentType = switch (format) {
             case MARKDOWN      -> "text/markdown";

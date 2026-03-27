@@ -130,11 +130,14 @@ public class EventLensConfig {
     public static class SecurityFeaturesConfig {
         private MetadataConfig metadata = new MetadataConfig();
         private AuthProviderConfig auth = new AuthProviderConfig();
+        private AuthorizationConfig authorization = new AuthorizationConfig();
 
         public MetadataConfig getMetadata() { return metadata; }
         public void setMetadata(MetadataConfig metadata) { this.metadata = metadata; }
         public AuthProviderConfig getAuth() { return auth; }
         public void setAuth(AuthProviderConfig auth) { this.auth = auth; }
+        public AuthorizationConfig getAuthorization() { return authorization; }
+        public void setAuthorization(AuthorizationConfig authorization) { this.authorization = authorization; }
     }
 
     public static class AuthProviderConfig {
@@ -219,6 +222,38 @@ public class EventLensConfig {
             pool.setLeakDetectionThresholdMs(0);
             return pool;
         }
+    }
+
+    public static class AuthorizationConfig {
+        private boolean enabled = false;
+        private List<String> defaultRoles = List.of();
+        private Map<String, List<String>> principalRoles = Map.of();
+        private List<RoleConfig> roles = List.of();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public List<String> getDefaultRoles() { return defaultRoles; }
+        public void setDefaultRoles(List<String> defaultRoles) { this.defaultRoles = defaultRoles == null ? List.of() : defaultRoles; }
+        public Map<String, List<String>> getPrincipalRoles() { return principalRoles; }
+        public void setPrincipalRoles(Map<String, List<String>> principalRoles) { this.principalRoles = principalRoles == null ? Map.of() : principalRoles; }
+        public List<RoleConfig> getRoles() { return roles; }
+        public void setRoles(List<RoleConfig> roles) { this.roles = roles == null ? List.of() : roles; }
+    }
+
+    public static class RoleConfig {
+        private String id;
+        private List<String> permissions = List.of();
+        private List<String> allowedSources = List.of();
+        private List<String> allowedAggregateTypes = List.of();
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public List<String> getPermissions() { return permissions; }
+        public void setPermissions(List<String> permissions) { this.permissions = permissions == null ? List.of() : permissions; }
+        public List<String> getAllowedSources() { return allowedSources; }
+        public void setAllowedSources(List<String> allowedSources) { this.allowedSources = allowedSources == null ? List.of() : allowedSources; }
+        public List<String> getAllowedAggregateTypes() { return allowedAggregateTypes; }
+        public void setAllowedAggregateTypes(List<String> allowedAggregateTypes) { this.allowedAggregateTypes = allowedAggregateTypes == null ? List.of() : allowedAggregateTypes; }
     }
 
     public static class RateLimitConfig {

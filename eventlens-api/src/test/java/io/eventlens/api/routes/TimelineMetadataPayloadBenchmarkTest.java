@@ -2,10 +2,12 @@ package io.eventlens.api.routes;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.eventlens.api.cache.QueryResultCache;
+import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.model.AggregateTimeline;
 import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.pii.PiiMasker;
+import io.eventlens.core.security.AuthorizationService;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -33,7 +35,8 @@ class TimelineMetadataPayloadBenchmarkTest {
                 null,
                 new PiiMasker(new EventLensConfig.PiiConfig()),
                 new QueryResultCache(false, 1),
-                Duration.ofSeconds(1));
+                Duration.ofSeconds(1),
+                new RouteAuthorizer(new AuthorizationService(null)));
 
         Method metadataOnly = TimelineRoutes.class.getDeclaredMethod("metadataOnly", AggregateTimeline.class);
         metadataOnly.setAccessible(true);

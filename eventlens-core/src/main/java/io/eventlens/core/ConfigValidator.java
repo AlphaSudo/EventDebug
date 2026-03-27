@@ -2,9 +2,11 @@ package io.eventlens.core;
 
 import io.eventlens.core.engine.BisectEngine;
 import io.eventlens.core.exception.ConfigurationException;
+import io.eventlens.core.security.Permission;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -90,6 +92,7 @@ public final class ConfigValidator {
 
         validateMetadata(config, issues);
         validateSecurityAuth(config, issues);
+        validateAuthorization(config, issues);
         validateLegacyDatasource(config, issues);
         validateDatasourceInstances(config.getDatasourcesOrLegacy(), issues);
         validateStreamInstances(config.getStreamsOrLegacy(), issues);
@@ -324,6 +327,72 @@ public final class ConfigValidator {
                     } else if (!normalizedScopes.add(scope.trim().toLowerCase())) {
                         issues.add(warning(path, "Duplicate scope"));
                     }
+                }
+            }
+        }
+    }
+
+    private static void validateAuthorization(EventLensConfig config, List<ValidationError> issues) {
+        var security = config.getSecurity();
+        if (security == null || security.getAuthorization() == null) {
+            return;
+        }
+
+        var authorization = security.getAuthorization();
+        if (!authorization.isEnabled()) {
+            return;
+        }
+
+        Map<String, EventLensConfig.RoleConfig> rolesById = new LinkedHashMap<>();
+        for (int i = 0; i < authorization.getRoles().size(); i++) {
+            EventLensConfig.RoleConfig role = authorization.getRoles().get(i);
+            String path = "security.authorization.roles[%d]".formatted(i);
+            if (role == null || isBlank(role.getId())) {
+                issues.add(error(path + ".id", "Role id is required"));
+                continue;
+            }
+            if (rolesById.putIfAbsent(role.getId(), role) != null) {
+                issues.add(error(path + ".id", "Duplicate role id: " + role.getId()));
+            }
+            if (role.getPermissions() == null || role.getPermissions().isEmpty()) {
+                issues.add(warning(path + ".permissions", "Role has no permissions"));
+            } else {
+                for (int permissionIndex = 0; permissionIndex < role.getPermissions().size(); permissionIndex++) {
+                    String permissionValue = role.getPermissions().get(permissionIndex);
+                    if (Permission.fromConfigValue(permissionValue).isEmpty()) {
+                        issues.add(error(
+                                path + ".permissions[%d]".formatted(permissionIndex),
+                                "Unknown permission: " + permissionValue));
+                    }
+                }
+            }
+        }
+
+        if (authorization.getDefaultRoles().isEmpty() && authorization.getPrincipalRoles().isEmpty()) {
+            issues.add(warning("security.authorization", "Authorization is enabled with no default roles or principal role assignments"));
+        }
+
+        for (int i = 0; i < authorization.getDefaultRoles().size(); i++) {
+            String roleId = authorization.getDefaultRoles().get(i);
+            if (!rolesById.containsKey(roleId)) {
+                issues.add(error("security.authorization.default-roles[%d]".formatted(i), "Unknown role: " + roleId));
+            }
+        }
+
+        for (Map.Entry<String, List<String>> entry : authorization.getPrincipalRoles().entrySet()) {
+            String principalId = entry.getKey();
+            if (isBlank(principalId)) {
+                issues.add(error("security.authorization.principal-roles", "Principal role assignments must use a non-blank principal id"));
+                continue;
+            }
+            List<String> assignedRoles = entry.getValue() == null ? List.of() : entry.getValue();
+            if (assignedRoles.isEmpty()) {
+                issues.add(warning("security.authorization.principal-roles." + principalId, "Principal has no assigned roles"));
+            }
+            for (int i = 0; i < assignedRoles.size(); i++) {
+                String roleId = assignedRoles.get(i);
+                if (!rolesById.containsKey(roleId)) {
+                    issues.add(error("security.authorization.principal-roles.%s[%d]".formatted(principalId, i), "Unknown role: " + roleId));
                 }
             }
         }

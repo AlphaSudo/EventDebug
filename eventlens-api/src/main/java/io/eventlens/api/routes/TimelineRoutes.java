@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import io.eventlens.api.cache.QueryResultCache;
 import io.eventlens.api.http.ConditionalGet;
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.core.InputValidator;
 import io.eventlens.core.audit.AuditEvent;
@@ -14,6 +15,7 @@ import io.eventlens.core.model.AggregateTimeline;
 import io.eventlens.core.model.StoredEvent;
 import io.eventlens.core.pagination.CursorCodec;
 import io.eventlens.core.pii.PiiMasker;
+import io.eventlens.core.security.Permission;
 import io.javalin.http.Context;
 
 import java.time.Duration;
@@ -33,18 +35,21 @@ public class TimelineRoutes {
     private final QueryResultCache queryCache;
     private final Duration timelineTtl;
     private final ObjectMapper mapper;
+    private final RouteAuthorizer routeAuthorizer;
 
     public TimelineRoutes(
             SourceRegistry sourceRegistry,
             AuditLogger auditLogger,
             PiiMasker piiMasker,
             QueryResultCache queryCache,
-            Duration timelineTtl) {
+            Duration timelineTtl,
+            RouteAuthorizer routeAuthorizer) {
         this.sourceRegistry = sourceRegistry;
         this.auditLogger = auditLogger;
         this.piiMasker = piiMasker;
         this.queryCache = queryCache;
         this.timelineTtl = timelineTtl;
+        this.routeAuthorizer = routeAuthorizer;
         this.mapper = new ObjectMapper()
                 .findAndRegisterModules()
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -59,12 +64,18 @@ public class TimelineRoutes {
         int offset = InputValidator.validateOffset(ctx.queryParam("offset"));
         String fields = normalizeFields(ctx.queryParam("fields"));
         var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_TIMELINE, source.id(), null)) {
+            return;
+        }
 
         TimelineEnvelope envelope = queryCache.getOrCompute(
                 "timeline",
                 source.id() + "|" + id + "|" + limit + "|" + offset + "|" + fields + "|" + (cursorParam == null ? "" : cursorParam),
                 timelineTtl,
                 () -> buildTimelineEnvelope(source, id, limit, offset, cursorParam, fields));
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_TIMELINE, source.id(), envelope.timeline().aggregateType())) {
+            return;
+        }
 
         auditLogger.log(SecurityContext.audit(ctx)
                 .action(AuditEvent.ACTION_VIEW_TIMELINE)
@@ -100,20 +111,44 @@ public class TimelineRoutes {
     public void replay(Context ctx) {
         String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
         var source = sourceRegistry.resolve(ctx.queryParam("source"));
-        ctx.json(source.replayEngine().replayFull(id));
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_REPLAY, source.id(), null)) {
+            return;
+        }
+        var transitions = source.replayEngine().replayFull(id);
+        String aggregateType = transitions.isEmpty() ? null : transitions.getFirst().event().aggregateType();
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_REPLAY, source.id(), aggregateType)) {
+            return;
+        }
+        ctx.json(transitions);
     }
 
     public void replayTo(Context ctx) {
         String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
         long seq = Long.parseLong(ctx.pathParam("seq"));
         var source = sourceRegistry.resolve(ctx.queryParam("source"));
-        ctx.json(source.replayEngine().replayTo(id, seq));
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_REPLAY, source.id(), null)) {
+            return;
+        }
+        var replay = source.replayEngine().replayTo(id, seq);
+        String aggregateType = replay.transitions().isEmpty() ? null : replay.transitions().getFirst().event().aggregateType();
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_REPLAY, source.id(), aggregateType)) {
+            return;
+        }
+        ctx.json(replay);
     }
 
     public void transitions(Context ctx) {
         String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
         var source = sourceRegistry.resolve(ctx.queryParam("source"));
-        ctx.json(source.replayEngine().replayFull(id));
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_REPLAY, source.id(), null)) {
+            return;
+        }
+        var transitions = source.replayEngine().replayFull(id);
+        String aggregateType = transitions.isEmpty() ? null : transitions.getFirst().event().aggregateType();
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_REPLAY, source.id(), aggregateType)) {
+            return;
+        }
+        ctx.json(transitions);
     }
 
     private TimelineEnvelope buildTimelineEnvelope(

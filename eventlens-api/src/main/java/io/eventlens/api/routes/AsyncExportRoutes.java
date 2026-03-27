@@ -3,7 +3,9 @@ package io.eventlens.api.routes;
 import io.eventlens.api.export.ExportJob;
 import io.eventlens.api.export.ExportService;
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.core.InputValidator;
+import io.eventlens.core.security.Permission;
 import io.javalin.http.Context;
 
 import java.nio.file.Files;
@@ -13,9 +15,11 @@ import java.util.Map;
 public final class AsyncExportRoutes {
 
     private final ExportService exportService;
+    private final RouteAuthorizer routeAuthorizer;
 
-    public AsyncExportRoutes(ExportService exportService) {
+    public AsyncExportRoutes(ExportService exportService, RouteAuthorizer routeAuthorizer) {
         this.exportService = exportService;
+        this.routeAuthorizer = routeAuthorizer;
     }
 
     public record ExportRequest(String aggregateId, String format, Integer limit) {
@@ -31,6 +35,9 @@ public final class AsyncExportRoutes {
 
         String aggregateId = InputValidator.validateAggregateId(req.aggregateId);
         int limit = req.limit != null ? Math.max(1, req.limit) : 50_000;
+        if (!routeAuthorizer.require(ctx, Permission.START_EXPORT, null, null)) {
+            return;
+        }
 
         ExportJob job = exportService.startAggregateExport(
                 aggregateId,
@@ -53,6 +60,9 @@ public final class AsyncExportRoutes {
 
     /** GET /api/events/export/{exportId} */
     public void status(Context ctx) {
+        if (!routeAuthorizer.require(ctx, Permission.START_EXPORT, null, null)) {
+            return;
+        }
         String exportId = ctx.pathParam("exportId");
         ExportJob job = exportService.get(exportId);
         if (job == null) {
@@ -103,6 +113,9 @@ public final class AsyncExportRoutes {
 
     /** GET /api/events/export/{exportId}/download */
     public void download(Context ctx) {
+        if (!routeAuthorizer.require(ctx, Permission.START_EXPORT, null, null)) {
+            return;
+        }
         String exportId = ctx.pathParam("exportId");
         var file = exportService.getDownloadFile(exportId);
         if (file == null) {

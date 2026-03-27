@@ -11,6 +11,7 @@ import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.routes.MetricsRoutes;
 import io.eventlens.api.http.RequestContextMdcFilter;
 import io.eventlens.api.security.BasicAuthenticator;
+import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.api.security.SessionAuthenticator;
 import io.eventlens.api.security.oidc.OidcIdTokenValidator;
 import io.eventlens.api.security.oidc.OidcLoginStateService;
@@ -25,6 +26,7 @@ import io.eventlens.core.exception.QueryTimeoutException;
 import io.eventlens.core.metadata.MetadataDatabase;
 import io.eventlens.core.pii.PiiMasker;
 import io.eventlens.core.plugin.PluginManager;
+import io.eventlens.core.security.AuthorizationService;
 import io.eventlens.core.security.Principal;
 import io.eventlens.core.security.SessionService;
 import io.eventlens.core.spi.EventStoreReader;
@@ -131,6 +133,9 @@ public class EventLensServer {
         var queryCache = new QueryResultCache(
                 config.getQueryCache().isEnabled(),
                 config.getQueryCache().getMaxEntries());
+        var authorizationConfig = config.getSecurity() != null ? config.getSecurity().getAuthorization() : null;
+        var authorizationService = new AuthorizationService(authorizationConfig);
+        var routeAuthorizer = new RouteAuthorizer(authorizationService);
 
         // ── Security middleware preparation ────────────────────────────────
         var rateLimitCfg = config.getServer().getSecurity() != null
@@ -142,19 +147,19 @@ public class EventLensServer {
 
         // ── Route handler instances ───────────────────────────────────────
         var aggregateRoutes    = new AggregateRoutes(sourceRegistry, auditLogger, queryCache,
-                Duration.ofSeconds(config.getQueryCache().getSearchTtlSeconds()));
+                Duration.ofSeconds(config.getQueryCache().getSearchTtlSeconds()), routeAuthorizer);
         var timelineRoutes     = new TimelineRoutes(sourceRegistry, auditLogger, piiMasker, queryCache,
-                Duration.ofSeconds(config.getQueryCache().getTimelineTtlSeconds()));
-        var datasourceRoutes   = new DatasourceRoutes(sourceRegistry);
-        var pluginRoutes       = new PluginRoutes(sourceRegistry);
-        var statisticsRoutes   = new StatisticsRoutes(sourceRegistry);
-        var bisectRoutes       = new BisectRoutes(bisectEngine);
-        var anomalyRoutes      = new AnomalyRoutes(sourceRegistry, config.getAnomaly(), auditLogger);
-        var exportRoutes       = new ExportRoutes(exportEngine, auditLogger);
-        var asyncExportRoutes  = new AsyncExportRoutes(exportService);
+                Duration.ofSeconds(config.getQueryCache().getTimelineTtlSeconds()), routeAuthorizer);
+        var datasourceRoutes   = new DatasourceRoutes(sourceRegistry, routeAuthorizer);
+        var pluginRoutes       = new PluginRoutes(sourceRegistry, routeAuthorizer);
+        var statisticsRoutes   = new StatisticsRoutes(sourceRegistry, routeAuthorizer);
+        var bisectRoutes       = new BisectRoutes(bisectEngine, routeAuthorizer);
+        var anomalyRoutes      = new AnomalyRoutes(sourceRegistry, config.getAnomaly(), auditLogger, routeAuthorizer);
+        var exportRoutes       = new ExportRoutes(exportEngine, auditLogger, routeAuthorizer);
+        var asyncExportRoutes  = new AsyncExportRoutes(exportService, routeAuthorizer);
         var healthRoutes       = new HealthRoutes(reader, config.getVersion());
-        var metricsRoutes      = new MetricsRoutes();
-        var openApiRoutes      = new OpenApiRoutes();
+        var metricsRoutes      = new MetricsRoutes(routeAuthorizer);
+        var openApiRoutes      = new OpenApiRoutes(routeAuthorizer);
         var liveTailWs         = new LiveTailWebSocket(sourceRegistry, pluginManager, auditLogger, defaultSourceId, sourceStreamBindings);
 
         var authConfig = config.getServer().getAuth();

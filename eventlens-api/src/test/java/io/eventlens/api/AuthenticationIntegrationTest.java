@@ -42,6 +42,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -255,15 +256,74 @@ class AuthenticationIntegrationTest {
         assertThat(apiResponse.body()).contains("ORD-1001");
     }
 
+    @Test
+    void authorizationRejectsAuthenticatedUserWithoutPermission() throws Exception {
+        int port = freePort();
+        server = startServer(port, true, null, cfg -> {
+            cfg.getSecurity().getAuthorization().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setPrincipalRoles(Map.of("admin", List.of("datasource-reader")));
+
+            var role = new EventLensConfig.RoleConfig();
+            role.setId("datasource-reader");
+            role.setPermissions(List.of("VIEW_DATASOURCES"));
+            cfg.getSecurity().getAuthorization().setRoles(List.of(role));
+        });
+
+        var client = HttpClient.newHttpClient();
+        var request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/search?q=ord".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.body()).contains("\"reason\":\"DENY_MISSING_PERMISSION\"");
+        assertThat(response.body()).contains("\"permission\":\"SEARCH_AGGREGATES\"");
+    }
+
+    @Test
+    void authorizationRejectsSourceOutsideRoleScope() throws Exception {
+        int port = freePort();
+        server = startServer(port, true, null, cfg -> {
+            cfg.getSecurity().getAuthorization().setEnabled(true);
+            cfg.getSecurity().getAuthorization().setPrincipalRoles(Map.of("admin", List.of("stats-reader")));
+
+            var role = new EventLensConfig.RoleConfig();
+            role.setId("stats-reader");
+            role.setPermissions(List.of("VIEW_STATISTICS"));
+            role.setAllowedSources(List.of("restricted"));
+            cfg.getSecurity().getAuthorization().setRoles(List.of(role));
+        });
+
+        var client = HttpClient.newHttpClient();
+        var request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/statistics?source=default".formatted(port)))
+                .header("Authorization", basicAuth("admin", "correct horse battery"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.body()).contains("\"reason\":\"DENY_SOURCE_SCOPE\"");
+        assertThat(response.body()).contains("\"source\":\"default\"");
+    }
+
     private EventLensServer startServer(int port, boolean authEnabled) {
-        return startServer(port, authEnabled, null);
+        return startServer(port, authEnabled, null, cfg -> {});
     }
 
     private EventLensServer startOidcServer(int port, String issuer) {
-        return startServer(port, false, issuer);
+        return startServer(port, false, issuer, cfg -> {});
     }
 
     private EventLensServer startServer(int port, boolean authEnabled, String oidcIssuer) {
+        return startServer(port, authEnabled, oidcIssuer, cfg -> {});
+    }
+
+    private EventLensServer startServer(int port, boolean authEnabled, String oidcIssuer, Consumer<EventLensConfig> configCustomizer) {
         EventStoreReader reader = new EventStoreReader() {
             @Override
             public List<StoredEvent> getEvents(String aggregateId) {
@@ -325,6 +385,7 @@ class AuthenticationIntegrationTest {
             cfg.getSecurity().getAuth().getOidc().setClientSecret("super-secret");
             cfg.getSecurity().getAuth().getOidc().setRedirectPath("/api/v1/auth/callback");
         }
+        configCustomizer.accept(cfg);
 
         var replayEngine = new ReplayEngine(reader, new ReducerRegistry());
         var bisectEngine = new BisectEngine(replayEngine, reader);

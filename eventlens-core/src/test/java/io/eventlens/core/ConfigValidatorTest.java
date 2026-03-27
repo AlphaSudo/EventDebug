@@ -89,4 +89,22 @@ class ConfigValidatorTest {
         assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.session.secure-cookie")
                 && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
     }
+
+    @Test
+    void authorizationRequiresKnownRolesAndPermissions() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().getAuthorization().setEnabled(true);
+
+        var role = new EventLensConfig.RoleConfig();
+        role.setId("viewer");
+        role.setPermissions(java.util.List.of("view_timeline", "not_real_permission"));
+        cfg.getSecurity().getAuthorization().setRoles(java.util.List.of(role));
+        cfg.getSecurity().getAuthorization().setDefaultRoles(java.util.List.of("missing-role"));
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.authorization.roles[0].permissions[1]")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.authorization.default-roles[0]")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
 }

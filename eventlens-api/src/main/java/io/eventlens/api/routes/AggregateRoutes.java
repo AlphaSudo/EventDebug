@@ -3,10 +3,12 @@ package io.eventlens.api.routes;
 import io.eventlens.api.cache.QueryResultCache;
 import io.eventlens.api.http.ConditionalGet;
 import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.core.InputValidator;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
+import io.eventlens.core.security.Permission;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.http.Context;
 
@@ -27,16 +29,19 @@ public class AggregateRoutes {
     private final AuditLogger auditLogger;
     private final QueryResultCache queryCache;
     private final Duration searchTtl;
+    private final RouteAuthorizer routeAuthorizer;
 
     public AggregateRoutes(
             SourceRegistry sourceRegistry,
             AuditLogger auditLogger,
             QueryResultCache queryCache,
-            Duration searchTtl) {
+            Duration searchTtl,
+            RouteAuthorizer routeAuthorizer) {
         this.sourceRegistry = sourceRegistry;
         this.auditLogger = auditLogger;
         this.queryCache = queryCache;
         this.searchTtl = searchTtl;
+        this.routeAuthorizer = routeAuthorizer;
     }
 
     public void search(Context ctx) {
@@ -50,6 +55,9 @@ public class AggregateRoutes {
                 InputValidator.validateLimit(ctx.queryParam("limit"), 20, MAX_LIMIT),
                 MAX_LIMIT);
         var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        if (!routeAuthorizer.require(ctx, Permission.SEARCH_AGGREGATES, source.id(), null)) {
+            return;
+        }
 
         var result = queryCache.getOrCompute(
                 "aggregate-search",
@@ -71,7 +79,11 @@ public class AggregateRoutes {
     }
 
     public void types(Context ctx) {
-        EventStoreReader reader = sourceRegistry.resolve(ctx.queryParam("source")).reader();
+        var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_AGGREGATE_TYPES, source.id(), null)) {
+            return;
+        }
+        EventStoreReader reader = source.reader();
         ConditionalGet.json(ctx, reader.getAggregateTypes());
     }
 
@@ -79,7 +91,11 @@ public class AggregateRoutes {
         int limit = Math.min(
                 InputValidator.validateLimit(ctx.queryParam("limit"), 50, MAX_LIMIT),
                 MAX_LIMIT);
-        EventStoreReader reader = sourceRegistry.resolve(ctx.queryParam("source")).reader();
+        var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_RECENT_EVENTS, source.id(), null)) {
+            return;
+        }
+        EventStoreReader reader = source.reader();
         ConditionalGet.json(ctx, reader.getRecentEvents(limit));
     }
 }
