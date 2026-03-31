@@ -41,7 +41,7 @@ jobs:
       run: ./gradlew sbom --no-daemon --no-configuration-cache
 
     - name: Generate dependency report
-      run: ./gradlew dependencyScan --no-daemon --no-configuration-cache
+      run: ./gradlew dependencyScan --no-daemon --no-configuration-cache --no-parallel
 
     - name: Upload release security artifacts
       uses: actions/upload-artifact@v4
