@@ -20,23 +20,40 @@ jobs:
       with:
         java-version: '21'
         distribution: 'temurin'
-        cache: gradle
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4
         
     - name: Set up Node.js 22
       uses: actions/setup-node@v6
       with:
         node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: eventlens-ui/package-lock.json
         
     - name: Give execute permission for gradlew
       run: chmod +x gradlew
       
     - name: Build the Fat JAR
       run: ./gradlew clean :eventlens-app:shadowJar --no-daemon
+
+    - name: Generate SBOM and dependency report
+      run: ./gradlew sbom dependencyScan --no-daemon
+
+    - name: Upload release security artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-security-artifacts
+        path: |
+          build/reports/**
+          build/libs/**
       
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        files: eventlens-app/build/libs/eventlens*.jar
+        files: |
+          eventlens-app/build/libs/eventlens*.jar
+          build/reports/**
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

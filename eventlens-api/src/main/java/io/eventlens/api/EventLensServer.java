@@ -5,10 +5,18 @@ import io.eventlens.api.routes.*;
 import io.eventlens.api.source.SourceRegistry;
 import io.eventlens.api.websocket.LiveTailWebSocket;
 import io.eventlens.api.export.ExportService;
+import io.eventlens.api.http.SecurityContext;
 import io.eventlens.api.shutdown.GracefulShutdown;
 import io.eventlens.api.metrics.EventLensMetrics;
 import io.eventlens.api.routes.MetricsRoutes;
 import io.eventlens.api.http.RequestContextMdcFilter;
+import io.eventlens.api.security.ApiKeyAuthenticator;
+import io.eventlens.api.security.BasicAuthenticator;
+import io.eventlens.api.security.RouteAuthorizer;
+import io.eventlens.api.security.SessionAuthenticator;
+import io.eventlens.api.security.oidc.OidcIdTokenValidator;
+import io.eventlens.api.security.oidc.OidcLoginStateService;
+import io.eventlens.api.security.oidc.OidcProviderClient;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.aggregator.ReducerRegistry;
 import io.eventlens.core.RateLimiter;
@@ -16,13 +24,21 @@ import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.*;
 import io.eventlens.core.exception.QueryTimeoutException;
+import io.eventlens.core.metadata.MetadataDatabase;
 import io.eventlens.core.pii.PiiMasker;
+import io.eventlens.core.pii.SensitiveDataProtector;
 import io.eventlens.core.plugin.PluginManager;
+import io.eventlens.core.security.ApiKeyService;
+import io.eventlens.core.security.AuthorizationService;
+import io.eventlens.core.security.Principal;
+import io.eventlens.core.security.SessionService;
+import io.eventlens.core.setup.InstanceSetupService;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.Javalin;
 import io.javalin.compression.CompressionStrategy;
 import io.javalin.compression.Gzip;
 import io.javalin.json.JavalinJackson;
+import io.javalin.http.staticfiles.Location;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,6 +72,7 @@ public class EventLensServer {
     private final int port;
     private final ExportService exportService;
     private final EventStoreReader reader;
+    private final MetadataDatabase metadataDatabase;
 
     public EventLensServer(
             EventLensConfig config,
@@ -68,7 +85,7 @@ public class EventLensServer {
             AnomalyDetector anomalyDetector,
             ExportEngine exportEngine,
             DiffEngine diffEngine) {
-        this(config, reader, replayEngine, reducerRegistry, pluginManager, defaultSourceId, bisectEngine, anomalyDetector, exportEngine, diffEngine, Map.of());
+        this(config, reader, replayEngine, reducerRegistry, pluginManager, defaultSourceId, bisectEngine, anomalyDetector, exportEngine, diffEngine, Map.of(), MetadataDatabase.disabled());
     }
 
     public EventLensServer(
@@ -83,19 +100,58 @@ public class EventLensServer {
             ExportEngine exportEngine,
             DiffEngine diffEngine,
             Map<String, String> sourceStreamBindings) {
+        this(config, reader, replayEngine, reducerRegistry, pluginManager, defaultSourceId, bisectEngine, anomalyDetector, exportEngine, diffEngine, sourceStreamBindings, MetadataDatabase.disabled());
+    }
+
+    public EventLensServer(
+            EventLensConfig config,
+            EventStoreReader reader,
+            ReplayEngine replayEngine,
+            ReducerRegistry reducerRegistry,
+            PluginManager pluginManager,
+            String defaultSourceId,
+            BisectEngine bisectEngine,
+            AnomalyDetector anomalyDetector,
+            ExportEngine exportEngine,
+            DiffEngine diffEngine,
+            Map<String, String> sourceStreamBindings,
+            MetadataDatabase metadataDatabase) {
+        this(config, reader, replayEngine, reducerRegistry, pluginManager, defaultSourceId, bisectEngine, anomalyDetector, exportEngine, diffEngine, sourceStreamBindings, metadataDatabase, null, true);
+    }
+
+    public EventLensServer(
+            EventLensConfig config,
+            EventStoreReader reader,
+            ReplayEngine replayEngine,
+            ReducerRegistry reducerRegistry,
+            PluginManager pluginManager,
+            String defaultSourceId,
+            BisectEngine bisectEngine,
+            AnomalyDetector anomalyDetector,
+            ExportEngine exportEngine,
+            DiffEngine diffEngine,
+            Map<String, String> sourceStreamBindings,
+            MetadataDatabase metadataDatabase,
+            String configPath,
+            boolean configPresentAtStartup) {
         this.port = config.getServer().getPort();
         this.reader = reader;
+        this.metadataDatabase = metadataDatabase == null ? MetadataDatabase.disabled() : metadataDatabase;
+        var setupService = new InstanceSetupService(config, configPath, configPresentAtStartup);
 
         // ── 1.8 Audit Logger ──────────────────────────────────────────────
         final AuditLogger auditLogger = new AuditLogger(
-                config.getAudit().isEnabled());
+                config.getAudit().isEnabled(),
+                this.metadataDatabase.isEnabled() ? this.metadataDatabase.repositories().auditLogs() : null,
+                () -> EventLensMetrics.recordAuditWriteFailure("metadata"));
 
         // ── 1.9 PII Masker ────────────────────────────────────────────────
         final PiiMasker piiMasker = new PiiMasker(
                 config.getDataProtection().getPii());
+        final SensitiveDataProtector sensitiveDataProtector = new SensitiveDataProtector(piiMasker);
 
         // ── 2.6 Async Export ───────────────────────────────────────────────
-        this.exportService = new ExportService(reader, auditLogger, config.getExport());
+        this.exportService = new ExportService(reader, auditLogger, config.getExport(), sensitiveDataProtector);
 
         // 4.1 Metrics: JVM binders + per-request instrumentation
         EventLensMetrics.initJvmMetrics(EventLensMetrics.registry);
@@ -104,6 +160,9 @@ public class EventLensServer {
         var queryCache = new QueryResultCache(
                 config.getQueryCache().isEnabled(),
                 config.getQueryCache().getMaxEntries());
+        var authorizationConfig = config.getSecurity() != null ? config.getSecurity().getAuthorization() : null;
+        var authorizationService = new AuthorizationService(authorizationConfig);
+        var routeAuthorizer = new RouteAuthorizer(authorizationService);
 
         // ── Security middleware preparation ────────────────────────────────
         var rateLimitCfg = config.getServer().getSecurity() != null
@@ -115,27 +174,93 @@ public class EventLensServer {
 
         // ── Route handler instances ───────────────────────────────────────
         var aggregateRoutes    = new AggregateRoutes(sourceRegistry, auditLogger, queryCache,
-                Duration.ofSeconds(config.getQueryCache().getSearchTtlSeconds()));
-        var timelineRoutes     = new TimelineRoutes(sourceRegistry, auditLogger, piiMasker, queryCache,
-                Duration.ofSeconds(config.getQueryCache().getTimelineTtlSeconds()));
-        var datasourceRoutes   = new DatasourceRoutes(sourceRegistry);
-        var pluginRoutes       = new PluginRoutes(sourceRegistry);
-        var statisticsRoutes   = new StatisticsRoutes(sourceRegistry);
-        var bisectRoutes       = new BisectRoutes(bisectEngine);
-        var anomalyRoutes      = new AnomalyRoutes(sourceRegistry, config.getAnomaly(), auditLogger);
-        var exportRoutes       = new ExportRoutes(exportEngine, auditLogger);
-        var asyncExportRoutes  = new AsyncExportRoutes(exportService);
-        var healthRoutes       = new HealthRoutes(reader, config.getVersion());
-        var metricsRoutes      = new MetricsRoutes();
-        var openApiRoutes      = new OpenApiRoutes();
+                Duration.ofSeconds(config.getQueryCache().getSearchTtlSeconds()), routeAuthorizer);
+        var timelineRoutes     = new TimelineRoutes(sourceRegistry, auditLogger, sensitiveDataProtector, queryCache,
+                Duration.ofSeconds(config.getQueryCache().getTimelineTtlSeconds()), routeAuthorizer);
+        var datasourceRoutes   = new DatasourceRoutes(sourceRegistry, routeAuthorizer);
+        var pluginRoutes       = new PluginRoutes(sourceRegistry, routeAuthorizer);
+        var statisticsRoutes   = new StatisticsRoutes(sourceRegistry, routeAuthorizer);
+        var bisectRoutes       = new BisectRoutes(bisectEngine, routeAuthorizer);
+        var anomalyRoutes      = new AnomalyRoutes(sourceRegistry, config.getAnomaly(), auditLogger, routeAuthorizer, sensitiveDataProtector);
+        var exportRoutes       = new ExportRoutes(sourceRegistry, exportEngine, auditLogger, routeAuthorizer, sensitiveDataProtector);
+        var asyncExportRoutes  = new AsyncExportRoutes(exportService, routeAuthorizer);
+        var healthRoutes       = new HealthRoutes(reader, config.getVersion(), this.metadataDatabase);
+        var metricsRoutes      = new MetricsRoutes(routeAuthorizer);
+        var auditRoutes        = new AuditRoutes(this.metadataDatabase.isEnabled() ? this.metadataDatabase.repositories().auditLogs() : null, routeAuthorizer);
+        var openApiRoutes      = new OpenApiRoutes(routeAuthorizer);
+        var piiRevealRoutes    = new PiiRevealRoutes(sourceRegistry, auditLogger, routeAuthorizer);
         var liveTailWs         = new LiveTailWebSocket(sourceRegistry, pluginManager, auditLogger, defaultSourceId, sourceStreamBindings);
 
         var authConfig = config.getServer().getAuth();
+        var v5AuthConfig = config.getSecurity() != null ? config.getSecurity().getAuth() : null;
+        var authProvider = v5AuthConfig != null ? v5AuthConfig.getProvider() : "disabled";
+        var apiKeysConfig = v5AuthConfig != null ? v5AuthConfig.getApiKeys() : new EventLensConfig.ApiKeysConfig();
+        boolean apiKeysEnabled = apiKeysConfig != null && apiKeysConfig.isEnabled() && this.metadataDatabase.isEnabled();
+        boolean sessionProviderEnabled = "basic".equalsIgnoreCase(authProvider) || "oidc".equalsIgnoreCase(authProvider);
+        boolean oidcEnabled = "oidc".equalsIgnoreCase(authProvider);
+        boolean basicCompatibilityEnabled = authConfig.isEnabled();
+        boolean authEnabled = basicCompatibilityEnabled || sessionProviderEnabled || apiKeysEnabled;
+        var sessionConfig = v5AuthConfig != null ? v5AuthConfig.getSession() : new EventLensConfig.SessionConfig();
+        var oidcCallbackPath = oidcEnabled ? v5AuthConfig.getOidc().getRedirectPath() : "/api/v1/auth/callback";
+        var basicAuthenticator = new BasicAuthenticator(
+                authConfig.getUsername(),
+                authConfig.getPassword(),
+                "EventLens");
+        var apiKeyService = apiKeysEnabled
+                ? new ApiKeyService(this.metadataDatabase.repositories().apiKeys(), apiKeysConfig)
+                : null;
+        var apiKeyAuthenticator = apiKeyService != null
+                ? new ApiKeyAuthenticator(apiKeyService, apiKeysConfig.getHeaderName())
+                : null;
+        var sessionService = this.metadataDatabase.isEnabled()
+                ? new SessionService(this.metadataDatabase.repositories().sessions(), sessionConfig)
+                : null;
+        if (sessionService != null) {
+            EventLensMetrics.bindActiveSessionsGauge(state -> ((SessionService) state).activeSessionCount(), sessionService);
+        }
+        var sessionAuthenticator = sessionService != null
+                ? new SessionAuthenticator(sessionService, sessionConfig.getCookieName())
+                : null;
+        var authRoutes = sessionService != null
+                ? new AuthRoutes(sessionService, sessionConfig, basicAuthenticator, auditLogger, authProvider, basicCompatibilityEnabled)
+                : null;
+        var oidcProviderClient = new OidcProviderClient();
+        var oidcRoutes = oidcEnabled && sessionService != null
+                ? new OidcAuthRoutes(
+                        sessionService,
+                        sessionConfig,
+                        v5AuthConfig.getOidc(),
+                        oidcProviderClient,
+                        new OidcIdTokenValidator(oidcProviderClient),
+                        new OidcLoginStateService(this.metadataDatabase.repositories().sessions()),
+                        auditLogger)
+                : null;
+        var apiKeyRoutes = apiKeyService != null ? new ApiKeyRoutes(apiKeyService, routeAuthorizer, auditLogger) : null;
+        var setupRoutes = new SetupRoutes(setupService);
 
         // ── Javalin 7: all routes + handlers inside cfg.routes ────────────
         this.app = Javalin.create(cfg -> {
-            cfg.staticFiles.add("/web"); // Embedded React build
-            cfg.jsonMapper(new JavalinJackson());
+            // Embedded React build — explicit MIME types prevent Javalin/Jetty
+            // from serving .css/.js as text/plain when running from a fat JAR,
+            // which would cause the browser to reject the stylesheets.
+            cfg.staticFiles.add(staticCfg -> {
+                staticCfg.hostedPath = "/";
+                staticCfg.directory  = "/web";
+                staticCfg.location   = Location.CLASSPATH;
+                // Explicitly set MIME types that Jetty sometimes mis-detects in JARs
+                staticCfg.mimeTypes.add("text/css",                "css");
+                staticCfg.mimeTypes.add("application/javascript",  "js");
+                staticCfg.mimeTypes.add("application/javascript",  "mjs");
+                staticCfg.mimeTypes.add("image/svg+xml",           "svg");
+                staticCfg.mimeTypes.add("font/woff",               "woff");
+                staticCfg.mimeTypes.add("font/woff2",              "woff2");
+                staticCfg.mimeTypes.add("image/x-icon",            "ico");
+                // Never cache HTML — ensures the browser fetches the latest index.html
+                // after every new build without requiring a manual cache clear.
+                staticCfg.headers.put("Cache-Control", "no-store");
+            });
+            // Use the shared mapper to ensure consistent date formatting (ISO-8601 instead of epoch)
+            cfg.jsonMapper(new JavalinJackson(io.eventlens.core.JsonUtil.mapper(), false));
             cfg.http.compressionStrategy = new CompressionStrategy(null, new Gzip());
 
             // ── Before filters ────────────────────────────────────────────
@@ -161,10 +286,10 @@ public class EventLensServer {
                 ctx.header("Content-Security-Policy",
                         "default-src 'self'; " +
                                 "script-src 'self'; " +
-                                "style-src 'self' 'unsafe-inline'; " +
+                                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
                                 "img-src 'self' data:; " +
                                 "connect-src 'self' ws: wss:; " +
-                                "font-src 'self'; " +
+                                "font-src 'self' https://fonts.gstatic.com; " +
                                 "frame-ancestors 'none'");
 
                 // HSTS (only when TLS is detected — reverse proxy sets X-Forwarded-Proto)
@@ -179,6 +304,7 @@ public class EventLensServer {
                 }
                 ctx.header("X-Request-Id", requestId);
                 ctx.attribute("requestId", requestId);
+                SecurityContext.setPrincipal(ctx, Principal.anonymous());
 
                 // 4.2 Structured logging context (MDC)
                 new RequestContextMdcFilter().handle(ctx);
@@ -231,7 +357,7 @@ public class EventLensServer {
 
             if (rateLimiter != null) {
                 cfg.routes.before("/api/*", ctx -> {
-                    String clientIp = extractClientIp(ctx);
+                    String clientIp = SecurityContext.clientIp(ctx);
                     var result = rateLimiter.tryConsume(clientIp);
 
                     ctx.header("X-RateLimit-Limit", String.valueOf(result.limitPerMinute()));
@@ -250,68 +376,116 @@ public class EventLensServer {
                 });
             }
 
-            if (authConfig.isEnabled()) {
+            cfg.routes.before("/api/*", ctx -> {
+                var setupStatus = setupService.status();
+                if (setupStatus.setupRequired()) {
+                    if (isPublicSetupPath(ctx.path())) {
+                        return;
+                    }
+                    ctx.status(503).json(Map.of(
+                            "error", "setup_required",
+                            "message", "Complete the first-run setup before using EventLens APIs."
+                    ));
+                    ctx.skipRemainingHandlers();
+                    return;
+                }
+                if (setupStatus.restartRequired() && !isPublicSetupPath(ctx.path())) {
+                    ctx.status(503).json(Map.of(
+                            "error", "restart_required",
+                            "message", "Setup has been saved. Restart EventLens to apply the new security mode."
+                    ));
+                    ctx.skipRemainingHandlers();
+                }
+            });
+
+            if (authEnabled) {
                 if ("changeme".equals(authConfig.getPassword())) {
                     log.warn("Basic auth is enabled with default password 'changeme'. Change server.auth.password in production.");
                 }
-                String expectedAuth = authConfig.getUsername() + ":" + authConfig.getPassword();
 
                 cfg.routes.before("/api/*", ctx -> {
-                    String clientIp = extractClientIp(ctx);
-                    String requestId = ctx.attribute("requestId");
-                    String userAgent = ctx.userAgent();
-                    String suppliedUser = ctx.basicAuthCredentials() != null
-                            ? ctx.basicAuthCredentials().getUsername() : null;
-                    String auth = ctx.basicAuthCredentials() != null
-                            ? suppliedUser + ":" + ctx.basicAuthCredentials().getPassword()
-                            : null;
+                    if (isPublicAuthPath(ctx.path(), oidcCallbackPath)) {
+                        if (sessionAuthenticator != null && hasSessionCookie(ctx, sessionConfig.getCookieName())) {
+                            var sessionResult = sessionAuthenticator.authenticate(ctx);
+                            if (sessionResult.success()) {
+                                SecurityContext.setPrincipal(ctx, sessionResult.principal());
+                                new RequestContextMdcFilter().handle(ctx);
+                            }
+                        }
+                        return;
+                    }
 
-                    if (!expectedAuth.equals(auth)) {
-                        // 1.8 — emit LOGIN_FAILED
-                        auditLogger.log(AuditEvent.builder()
-                                .action(AuditEvent.ACTION_LOGIN_FAILED)
-                                .resourceType(AuditEvent.RT_AUTH)
-                                .userId(suppliedUser != null ? suppliedUser : "anonymous")
-                                .authMethod("basic")
-                                .clientIp(clientIp)
-                                .requestId(requestId != null ? requestId : "unknown")
-                                .userAgent(userAgent)
-                                .details(Map.of("reason", "invalid_credentials", "path", ctx.path()))
-                                .build());
+                    var authHolder = resolveAuthentication(
+                            ctx,
+                            apiKeyAuthenticator,
+                            sessionAuthenticator,
+                            basicCompatibilityEnabled ? basicAuthenticator : null,
+                            apiKeysConfig != null ? apiKeysConfig.getHeaderName() : "X-API-Key",
+                            sessionConfig.getCookieName());
+                    var authResult = authHolder.result();
+                    if (!authResult.success()) {
+                        EventLensMetrics.recordAuthAttempt(authHolder.method(), "failure");
+                        // 1.8 - emit LOGIN_FAILED, but only if they actually attempted to login (not just an unauthenticated fetch)
+                        if (!"missing_credentials".equals(authResult.failureReason())) {
+                            auditLogger.log(SecurityContext.audit(ctx)
+                                    .action(AuditEvent.ACTION_LOGIN_FAILED)
+                                    .resourceType(AuditEvent.RT_AUTH)
+                                    .userId(authResult.attemptedUserId() != null ? authResult.attemptedUserId() : "anonymous")
+                                    .authMethod(authHolder.method())
+                                    .details(Map.of("reason", authResult.failureReason(), "path", ctx.path()))
+                                    .build());
+                        }
 
-                        ctx.status(401)
-                                .header("WWW-Authenticate", "Basic realm=\"EventLens\"")
-                                .json(Map.of("error", "Unauthorized"));
+                        ctx.status(401);
+                        // We omit the WWW-Authenticate header here so the browser doesn't
+                        // show its native basic-auth modal. The custom UI will handle the 401.
+                        ctx.json(Map.of("error", "Unauthorized"));
                         ctx.skipRemainingHandlers();
                     } else {
-                        // 1.8 — emit LOGIN success (once per request, not once per session)
-                        auditLogger.log(AuditEvent.builder()
-                                .action(AuditEvent.ACTION_LOGIN)
-                                .resourceType(AuditEvent.RT_AUTH)
-                                .userId(suppliedUser)
-                                .authMethod("basic")
-                                .clientIp(clientIp)
-                                .requestId(requestId != null ? requestId : "unknown")
-                                .userAgent(userAgent)
-                                .details(Map.of("path", ctx.path()))
-                                .build());
-                        // Store principal for downstream audit events
-                        ctx.attribute("auditUserId", suppliedUser);
-                        ctx.attribute("auditAuthMethod", "basic");
+                        EventLensMetrics.recordAuthAttempt(authHolder.method(), "success");
+                        SecurityContext.setPrincipal(ctx, authResult.principal());
+                        new RequestContextMdcFilter().handle(ctx);
+                        if (isMutatingMethod(ctx.method().name()) && SecurityContext.session(ctx) != null) {
+                            String expectedCsrf = SecurityContext.csrfToken(ctx);
+                            String suppliedCsrf = ctx.header("X-CSRF-Token");
+                            if (expectedCsrf == null || !expectedCsrf.equals(suppliedCsrf)) {
+                                ctx.status(403).json(Map.of("error", "csrf_required"));
+                                ctx.skipRemainingHandlers();
+                                return;
+                            }
+                        }
+                        if ("basic".equals(authHolder.method())) {
+                            auditLogger.log(SecurityContext.audit(ctx)
+                                    .action(AuditEvent.ACTION_LOGIN)
+                                    .resourceType(AuditEvent.RT_AUTH)
+                                    .details(Map.of("path", ctx.path()))
+                                    .build());
+                        }
                     }
                 });
                 cfg.routes.before("/ws/*", ctx -> {
-                    String auth = ctx.basicAuthCredentials() != null
-                            ? ctx.basicAuthCredentials().getUsername() + ":" + ctx.basicAuthCredentials().getPassword()
-                            : null;
-                    if (!expectedAuth.equals(auth)) {
-                        ctx.status(401)
-                                .header("WWW-Authenticate", "Basic realm=\"EventLens\"")
-                                .json(Map.of("error", "Unauthorized"));
+                    var authHolder = resolveAuthentication(
+                            ctx,
+                            apiKeyAuthenticator,
+                            sessionAuthenticator,
+                            basicCompatibilityEnabled ? basicAuthenticator : null,
+                            apiKeysConfig != null ? apiKeysConfig.getHeaderName() : "X-API-Key",
+                            sessionConfig.getCookieName());
+                    var authResult = authHolder.result();
+                    if (!authResult.success()) {
+                        EventLensMetrics.recordAuthAttempt(authHolder.method(), "failure");
+                        ctx.status(401);
+                        // We omit the WWW-Authenticate header here so the browser doesn't
+                        // show its native basic-auth modal. The custom UI will handle the 401.
+                        ctx.json(Map.of("error", "Unauthorized"));
                         ctx.skipRemainingHandlers();
+                    } else {
+                        EventLensMetrics.recordAuthAttempt(authHolder.method(), "success");
+                        SecurityContext.setPrincipal(ctx, authResult.principal());
+                        new RequestContextMdcFilter().handle(ctx);
                     }
                 });
-                log.info("Basic auth ENABLED for /api/* and /ws/*");
+                log.info("Auth enabled for /api/* and /ws/* with provider={} basicCompatibility={}", authProvider, basicCompatibilityEnabled);
             }
 
             // ── Routes ────────────────────────────────────────────────────
@@ -324,9 +498,36 @@ public class EventLensServer {
 
             // Metrics (4.1)
             cfg.routes.get("/api/v1/metrics", metricsRoutes::metrics);
+            cfg.routes.get("/api/v1/audit", auditRoutes::recent);
+            cfg.routes.get("/api/v1/setup/status", setupRoutes::status);
+            cfg.routes.post("/api/v1/setup/apply", setupRoutes::apply);
+            if (apiKeyRoutes != null) {
+                cfg.routes.get("/api/v1/admin/api-keys", apiKeyRoutes::list);
+                cfg.routes.post("/api/v1/admin/api-keys", apiKeyRoutes::create);
+                cfg.routes.post("/api/v1/admin/api-keys/{id}/revoke", apiKeyRoutes::revoke);
+            }
 
             // OpenAPI (5.2)
             cfg.routes.get("/api/v1/openapi.json", openApiRoutes::spec);
+
+            if (authRoutes != null) {
+                cfg.routes.get("/api/v1/auth/session", authRoutes::session);
+                cfg.routes.post("/api/v1/auth/logout", authRoutes::logout);
+                cfg.routes.post("/api/v1/auth/login/basic", authRoutes::createBasicSession);
+            } else {
+                // Auth is disabled (no MetadataDatabase / no session provider).
+                // The UI always probes this endpoint on startup; return a minimal
+                // anonymous response so it can proceed without showing "Server unavailable".
+                cfg.routes.get("/api/v1/auth/session", ctx -> ctx.json(Map.of(
+                        "authenticated", false,
+                        "authEnabled", false,
+                        "user", Map.of("id", "anonymous", "role", "admin")
+                )));
+            }
+            if (oidcRoutes != null) {
+                cfg.routes.get("/api/v1/auth/login/oidc", oidcRoutes::start);
+                cfg.routes.get(v5AuthConfig.getOidc().getRedirectPath(), oidcRoutes::callback);
+            }
 
             // Aggregates (v1)
             cfg.routes.get("/api/v1/aggregates/search", aggregateRoutes::search);
@@ -398,6 +599,7 @@ public class EventLensServer {
 
             // Export (v1 + legacy)
             cfg.routes.get("/api/v1/aggregates/{id}/export", exportRoutes::export);
+            cfg.routes.post("/api/v1/aggregates/{id}/events/{seq}/reveal", piiRevealRoutes::revealEvent);
             cfg.routes.get("/api/aggregates/{id}/export", ctx -> {
                 markDeprecated(ctx, "/api/v1/aggregates/" + ctx.pathParam("id") + "/export");
                 exportRoutes.export(ctx);
@@ -465,6 +667,12 @@ public class EventLensServer {
                     }
                 },
                 () -> {
+                    try {
+                        metadataDatabase.close();
+                    } catch (Exception ignored) {
+                    }
+                },
+                () -> {
                     if (reader instanceof AutoCloseable closeable) {
                         closeable.close();
                     }
@@ -475,6 +683,20 @@ public class EventLensServer {
 
     public void stop() {
         app.stop();
+        try {
+            exportService.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            metadataDatabase.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            if (reader instanceof AutoCloseable closeable) {
+                closeable.close();
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     public Javalin getApp() {
@@ -487,18 +709,61 @@ public class EventLensServer {
         ctx.header("Link", "<" + successor + ">; rel=\"successor-version\"");
     }
 
-    private static String extractClientIp(io.javalin.http.Context ctx) {
-        String xff = ctx.header("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int comma = xff.indexOf(',');
-            String first = (comma >= 0 ? xff.substring(0, comma) : xff).trim();
-            if (!first.isBlank()) return first;
+    private static boolean isPublicAuthPath(String path, String oidcCallbackPath) {
+        return "/api/v1/auth/session".equals(path)
+                || "/api/v1/auth/logout".equals(path)
+                || "/api/v1/auth/login/basic".equals(path)
+                || "/api/v1/auth/login/oidc".equals(path)
+                || "/api/v1/setup/status".equals(path)
+                || "/api/v1/setup/apply".equals(path)
+                || oidcCallbackPath.equals(path);
+    }
+
+    private static boolean isPublicSetupPath(String path) {
+        return "/api/v1/setup/status".equals(path)
+                || "/api/v1/setup/apply".equals(path)
+                || "/api/v1/auth/session".equals(path)
+                || "/api/v1/health/live".equals(path)
+                || "/api/v1/health/ready".equals(path)
+                || "/api/health".equals(path);
+    }
+
+    private static boolean hasSessionCookie(io.javalin.http.Context ctx, String cookieName) {
+        String value = ctx.cookie(cookieName);
+        return value != null && !value.isBlank();
+    }
+
+    private static boolean isMutatingMethod(String method) {
+        return "POST".equalsIgnoreCase(method)
+                || "PUT".equalsIgnoreCase(method)
+                || "PATCH".equalsIgnoreCase(method)
+                || "DELETE".equalsIgnoreCase(method);
+    }
+
+    private static AuthenticationResultHolder resolveAuthentication(
+            io.javalin.http.Context ctx,
+            ApiKeyAuthenticator apiKeyAuthenticator,
+            SessionAuthenticator sessionAuthenticator,
+            BasicAuthenticator basicAuthenticator,
+            String apiKeyHeaderName,
+            String sessionCookieName) {
+        if (apiKeyAuthenticator != null && hasApiKeyHeader(ctx, apiKeyHeaderName)) {
+            return new AuthenticationResultHolder("api-key", apiKeyAuthenticator.authenticate(ctx));
         }
-        String xri = ctx.header("X-Real-IP");
-        if (xri != null && !xri.isBlank()) return xri.trim();
-        return ctx.ip();
+        if (sessionAuthenticator != null && hasSessionCookie(ctx, sessionCookieName)) {
+            return new AuthenticationResultHolder("session", sessionAuthenticator.authenticate(ctx));
+        }
+        if (basicAuthenticator != null) {
+            return new AuthenticationResultHolder("basic", basicAuthenticator.authenticate(ctx));
+        }
+        return new AuthenticationResultHolder("session", io.eventlens.api.security.AuthenticationResult.failure(null, "missing_session", null));
+    }
+
+    private static boolean hasApiKeyHeader(io.javalin.http.Context ctx, String headerName) {
+        String value = ctx.header(headerName);
+        return value != null && !value.isBlank();
+    }
+
+    private record AuthenticationResultHolder(String method, io.eventlens.api.security.AuthenticationResult result) {
     }
 }
-
-
-

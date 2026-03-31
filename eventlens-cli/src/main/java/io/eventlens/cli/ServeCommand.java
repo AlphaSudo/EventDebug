@@ -12,6 +12,7 @@ import io.eventlens.core.engine.BisectEngine;
 import io.eventlens.core.engine.DiffEngine;
 import io.eventlens.core.engine.ExportEngine;
 import io.eventlens.core.engine.ReplayEngine;
+import io.eventlens.core.metadata.MetadataDatabase;
 import io.eventlens.core.plugin.PluginDiscovery;
 import io.eventlens.core.plugin.PluginManager;
 import io.eventlens.core.spi.EventStoreReader;
@@ -64,7 +65,9 @@ public class ServeCommand implements Runnable {
 
     @Override
     public void run() {
-        EventLensConfig config = configPath != null ? ConfigLoader.load(configPath) : ConfigLoader.load();
+        var loadedConfig = configPath != null ? ConfigLoader.loadResolved(configPath) : ConfigLoader.loadResolved();
+        EventLensConfig config = loadedConfig.config();
+        String effectiveConfigPath = loadedConfig.sourcePath() != null ? loadedConfig.sourcePath() : ConfigLoader.defaultConfigPath();
 
         if (port != null) config.getServer().setPort(port);
         if (dbUrl != null) config.getDatasource().setUrl(dbUrl);
@@ -72,7 +75,13 @@ public class ServeCommand implements Runnable {
         if (dbPassword != null) config.getDatasource().setPassword(dbPassword);
         if (tableName != null) config.getDatasource().setTable(tableName);
 
+        var validationIssues = ConfigValidator.validate(config);
+        validationIssues.stream()
+                .filter(issue -> issue.severity() == ConfigValidator.ValidationError.Severity.WARNING)
+                .forEach(issue -> log.warn("Config warning {}: {}", issue.path(), issue.message()));
         ConfigValidator.validateOrThrow(config);
+        MetadataDatabase metadataDatabase = MetadataDatabase.open(
+                config.getSecurity() != null ? config.getSecurity().getMetadata() : null);
 
         PluginManager pluginManager = new PluginManager(config.getPlugins().getHealthCheckIntervalSeconds());
         PluginDiscovery.DiscoveryResult discovered = new PluginDiscovery().discoverFromClasspath()
@@ -107,9 +116,17 @@ public class ServeCommand implements Runnable {
                 anomalyDetector,
                 exportEngine,
                 diffEngine,
-                datasourceStreamBindings(config));
+                datasourceStreamBindings(config),
+                metadataDatabase,
+                effectiveConfigPath,
+                loadedConfig.fromFile());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                metadataDatabase.close();
+            } catch (Exception e) {
+                log.warn("Failed to close metadata database cleanly", e);
+            }
             try {
                 pluginManager.close();
             } catch (Exception e) {
@@ -228,4 +245,3 @@ public class ServeCommand implements Runnable {
         };
     }
 }
-

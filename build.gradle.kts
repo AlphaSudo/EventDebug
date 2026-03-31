@@ -1,6 +1,7 @@
 plugins {
     java
     id("org.owasp.dependencycheck") version "12.2.0"
+    id("org.cyclonedx.bom") version "3.2.0"
 }
 
 // Shared versions
@@ -69,6 +70,12 @@ tasks.register("dependencyScan") {
     group = "verification"
     description = "Run OWASP Dependency Check across all modules"
     dependsOn("dependencyCheckAggregate")
+}
+
+tasks.register("sbom") {
+    group = "verification"
+    description = "Generate a CycloneDX software bill of materials"
+    dependsOn("cyclonedxBom")
 }
 
 dependencyCheck {

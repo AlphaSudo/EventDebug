@@ -87,6 +87,34 @@ ui:
 audit:
   enabled: true
 
+security:
+  production-mode: false
+  setup:
+    completed: true # set false to force the setup wizard on next boot; leave unset/true for normal manual config
+  metadata:
+    enabled: false
+    jdbc-url: jdbc:sqlite:./data/eventlens-metadata.db
+    wal-enabled: true
+    busy-timeout-ms: 5000
+    foreign-keys-enabled: true
+  auth:
+    provider: disabled
+    session:
+      cookie-name: __Host-eventlens_session
+      idle-timeout-seconds: 1800
+      absolute-timeout-seconds: 28800
+      secure-cookie: true
+      same-site: Lax
+    api-keys:
+      enabled: false
+      header-name: X-API-Key
+      key-prefix: el
+  authorization:
+    enabled: false
+    default-roles: []
+    principal-roles: {}
+    roles: []
+
 data-protection:
   pii:
     enabled: false
@@ -104,9 +132,12 @@ data-protection:
         regex: "\\d{3}-\\d{2}-\\d{4}"
         mask: "***-**-****"
 
+# Docker note:
+# When metadata storage is enabled in a container, mount /app/data to a persistent volume
+# so metadata-backed sessions, audit records, and API keys survive restarts.
+
 export:
   directory: ./exports
   max-concurrent: 2
   max-events-per-export: 100000
   expire-after-seconds: 3600
-

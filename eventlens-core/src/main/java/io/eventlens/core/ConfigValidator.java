@@ -2,8 +2,11 @@ package io.eventlens.core;
 
 import io.eventlens.core.engine.BisectEngine;
 import io.eventlens.core.exception.ConfigurationException;
+import io.eventlens.core.security.Permission;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -87,6 +90,10 @@ public final class ConfigValidator {
             }
         }
 
+        validateMetadata(config, issues);
+        validateSecurityAuth(config, issues);
+        validateAuthorization(config, issues);
+        validateProductionGuardrails(config, issues);
         validateLegacyDatasource(config, issues);
         validateDatasourceInstances(config.getDatasourcesOrLegacy(), issues);
         validateStreamInstances(config.getStreamsOrLegacy(), issues);
@@ -214,6 +221,255 @@ public final class ConfigValidator {
         }
     }
 
+    private static void validateMetadata(EventLensConfig config, List<ValidationError> issues) {
+        var security = config.getSecurity();
+        if (security == null || security.getMetadata() == null) {
+            return;
+        }
+
+        var metadata = security.getMetadata();
+        if (!metadata.isEnabled()) {
+            return;
+        }
+
+        if (isBlank(metadata.getJdbcUrl())) {
+            issues.add(error("security.metadata.jdbc-url", "Required when metadata storage is enabled"));
+        } else if (!metadata.getJdbcUrl().startsWith("jdbc:sqlite:")) {
+            issues.add(error("security.metadata.jdbc-url", "v5 metadata storage currently supports SQLite only"));
+        } else if ("jdbc:sqlite::memory:".equalsIgnoreCase(metadata.getJdbcUrl())) {
+            issues.add(warning("security.metadata.jdbc-url",
+                    "In-memory metadata loses sessions, API keys, and DB-backed audit data on restart"));
+        }
+
+        if (metadata.getBusyTimeoutMs() < 0 || metadata.getBusyTimeoutMs() > 600_000) {
+            issues.add(error("security.metadata.busy-timeout-ms", "Must be between 0 and 600000"));
+        }
+
+        validatePool("security.metadata.pool", metadata.getPool(), issues);
+    }
+
+    private static void validateSecurityAuth(EventLensConfig config, List<ValidationError> issues) {
+        var security = config.getSecurity();
+        if (security == null || security.getAuth() == null) {
+            return;
+        }
+
+        var auth = security.getAuth();
+        boolean productionMode = security.isProductionMode();
+        String provider = auth.getProvider() == null ? "disabled" : auth.getProvider().trim().toLowerCase();
+        if (!Set.of("disabled", "basic", "oidc").contains(provider)) {
+            issues.add(error("security.auth.provider", "Must be one of: disabled, basic, oidc"));
+            return;
+        }
+
+        var session = auth.getSession();
+        var apiKeys = auth.getApiKeys();
+        if (session != null) {
+            if (isBlank(session.getCookieName())) {
+                issues.add(error("security.auth.session.cookie-name", "Required"));
+            }
+            if (session.getIdleTimeoutSeconds() < 60 || session.getIdleTimeoutSeconds() > 86_400) {
+                issues.add(error("security.auth.session.idle-timeout-seconds", "Must be between 60 and 86400"));
+            }
+            if (session.getAbsoluteTimeoutSeconds() < session.getIdleTimeoutSeconds()) {
+                issues.add(error("security.auth.session.absolute-timeout-seconds",
+                        "Must be >= idle-timeout-seconds"));
+            }
+            if (session.getAbsoluteTimeoutSeconds() > 604_800) {
+                issues.add(error("security.auth.session.absolute-timeout-seconds", "Must be <= 604800"));
+            }
+            if (!Set.of("lax", "strict", "none").contains(normalize(session.getSameSite()))) {
+                issues.add(error("security.auth.session.same-site", "Must be one of: Lax, Strict, None"));
+            }
+            if ("none".equals(normalize(session.getSameSite())) && !session.isSecureCookie()) {
+                issues.add(error("security.auth.session.secure-cookie",
+                        "Must be true when same-site is None"));
+            }
+            if (session.getCookieName() != null
+                    && session.getCookieName().startsWith("__Host-")
+                    && !session.isSecureCookie()) {
+                issues.add(error("security.auth.session.secure-cookie",
+                        "Must be true for __Host- prefixed cookies"));
+            }
+            if (productionMode && ("basic".equals(provider) || "oidc".equals(provider)) && !session.isSecureCookie()) {
+                issues.add(error("security.auth.session.secure-cookie",
+                        "Must be true for browser sessions in production mode"));
+            }
+        }
+
+        if (apiKeys != null && apiKeys.isEnabled()) {
+            if (security.getMetadata() == null || !security.getMetadata().isEnabled()) {
+                issues.add(error("security.metadata.enabled", "Must be enabled when security.auth.api-keys.enabled is true"));
+            }
+            if (isBlank(apiKeys.getHeaderName())) {
+                issues.add(error("security.auth.api-keys.header-name", "Required when API keys are enabled"));
+            }
+            if (isBlank(apiKeys.getKeyPrefix())) {
+                issues.add(error("security.auth.api-keys.key-prefix", "Required when API keys are enabled"));
+            } else if (!apiKeys.getKeyPrefix().matches("[A-Za-z0-9_-]{2,32}")) {
+                issues.add(error("security.auth.api-keys.key-prefix", "Must be 2-32 chars of letters, digits, '_' or '-'"));
+            }
+        }
+
+        if ("oidc".equals(provider)) {
+            if (security.getMetadata() == null || !security.getMetadata().isEnabled()) {
+                issues.add(error("security.metadata.enabled", "Must be enabled when security.auth.provider is oidc"));
+            }
+
+            var oidc = auth.getOidc();
+            if (oidc == null) {
+                issues.add(error("security.auth.oidc", "Required when provider is oidc"));
+                return;
+            }
+            if (isBlank(oidc.getIssuer())) {
+                issues.add(error("security.auth.oidc.issuer", "Required when provider is oidc"));
+            }
+            if (isBlank(oidc.getClientId())) {
+                issues.add(error("security.auth.oidc.client-id", "Required when provider is oidc"));
+            }
+            if (isBlank(oidc.getClientSecret())) {
+                issues.add(error("security.auth.oidc.client-secret", "Required when provider is oidc"));
+            }
+            if (isBlank(oidc.getRedirectPath()) || !oidc.getRedirectPath().startsWith("/")) {
+                issues.add(error("security.auth.oidc.redirect-path", "Must start with '/'"));
+            }
+            if (isBlank(oidc.getPostLogoutRedirectPath()) || !oidc.getPostLogoutRedirectPath().startsWith("/")) {
+                issues.add(error("security.auth.oidc.post-logout-redirect-path", "Must start with '/'"));
+            }
+            if (oidc.getScopes() == null || oidc.getScopes().isEmpty()) {
+                issues.add(error("security.auth.oidc.scopes", "At least one scope is required"));
+            } else {
+                var normalizedScopes = new HashSet<String>();
+                for (int i = 0; i < oidc.getScopes().size(); i++) {
+                    String scope = oidc.getScopes().get(i);
+                    String path = "security.auth.oidc.scopes[%d]".formatted(i);
+                    if (isBlank(scope)) {
+                        issues.add(error(path, "Scope must not be blank"));
+                    } else if (!normalizedScopes.add(scope.trim().toLowerCase())) {
+                        issues.add(warning(path, "Duplicate scope"));
+                    }
+                }
+            }
+        }
+
+        boolean legacyBasicEnabled = config.getServer() != null
+                && config.getServer().getAuth() != null
+                && config.getServer().getAuth().isEnabled();
+        boolean browserSessionEnabled = "basic".equals(provider) || "oidc".equals(provider);
+        boolean apiKeysEnabled = apiKeys != null && apiKeys.isEnabled();
+        boolean effectiveAuthEnabled = legacyBasicEnabled || browserSessionEnabled || apiKeysEnabled;
+        if (productionMode && !effectiveAuthEnabled) {
+            issues.add(error("security.production-mode",
+                    "Production mode requires at least one authentication mechanism (legacy basic auth, security.auth.provider, or API keys)"));
+        }
+
+        if (productionMode
+                && config.getAudit() != null
+                && !config.getAudit().isEnabled()
+                && (browserSessionEnabled
+                || apiKeysEnabled
+                || (config.getDataProtection() != null
+                    && config.getDataProtection().getPii() != null
+                    && config.getDataProtection().getPii().isEnabled())
+                || (config.getSecurity() != null
+                    && config.getSecurity().getAuthorization() != null
+                    && config.getSecurity().getAuthorization().isEnabled()))) {
+            issues.add(error("audit.enabled",
+                    "Audit must be enabled in production mode when security features are enabled"));
+        }
+    }
+
+    private static void validateProductionGuardrails(EventLensConfig config, List<ValidationError> issues) {
+        var security = config.getSecurity();
+        if (security == null || !security.isProductionMode()) {
+            return;
+        }
+
+        var server = config.getServer();
+        if (server != null) {
+            var origins = server.getAllowedOrigins();
+            if (origins == null || origins.isEmpty()) {
+                issues.add(error("server.allowed-origins",
+                        "Production mode requires an explicit browser origin allowlist"));
+            } else if (origins.contains("*")) {
+                issues.add(error("server.allowed-origins",
+                        "Production mode does not allow wildcard origins"));
+            }
+        }
+
+        var metadata = security.getMetadata();
+        if (metadata != null && metadata.isEnabled() && "jdbc:sqlite::memory:".equalsIgnoreCase(metadata.getJdbcUrl())) {
+            issues.add(error("security.metadata.jdbc-url",
+                    "Production mode does not allow in-memory metadata storage"));
+        }
+    }
+
+    private static void validateAuthorization(EventLensConfig config, List<ValidationError> issues) {
+        var security = config.getSecurity();
+        if (security == null || security.getAuthorization() == null) {
+            return;
+        }
+
+        var authorization = security.getAuthorization();
+        if (!authorization.isEnabled()) {
+            return;
+        }
+
+        Map<String, EventLensConfig.RoleConfig> rolesById = new LinkedHashMap<>();
+        for (int i = 0; i < authorization.getRoles().size(); i++) {
+            EventLensConfig.RoleConfig role = authorization.getRoles().get(i);
+            String path = "security.authorization.roles[%d]".formatted(i);
+            if (role == null || isBlank(role.getId())) {
+                issues.add(error(path + ".id", "Role id is required"));
+                continue;
+            }
+            if (rolesById.putIfAbsent(role.getId(), role) != null) {
+                issues.add(error(path + ".id", "Duplicate role id: " + role.getId()));
+            }
+            if (role.getPermissions() == null || role.getPermissions().isEmpty()) {
+                issues.add(warning(path + ".permissions", "Role has no permissions"));
+            } else {
+                for (int permissionIndex = 0; permissionIndex < role.getPermissions().size(); permissionIndex++) {
+                    String permissionValue = role.getPermissions().get(permissionIndex);
+                    if (Permission.fromConfigValue(permissionValue).isEmpty()) {
+                        issues.add(error(
+                                path + ".permissions[%d]".formatted(permissionIndex),
+                                "Unknown permission: " + permissionValue));
+                    }
+                }
+            }
+        }
+
+        if (authorization.getDefaultRoles().isEmpty() && authorization.getPrincipalRoles().isEmpty()) {
+            issues.add(warning("security.authorization", "Authorization is enabled with no default roles or principal role assignments"));
+        }
+
+        for (int i = 0; i < authorization.getDefaultRoles().size(); i++) {
+            String roleId = authorization.getDefaultRoles().get(i);
+            if (!rolesById.containsKey(roleId)) {
+                issues.add(error("security.authorization.default-roles[%d]".formatted(i), "Unknown role: " + roleId));
+            }
+        }
+
+        for (Map.Entry<String, List<String>> entry : authorization.getPrincipalRoles().entrySet()) {
+            String principalId = entry.getKey();
+            if (isBlank(principalId)) {
+                issues.add(error("security.authorization.principal-roles", "Principal role assignments must use a non-blank principal id"));
+                continue;
+            }
+            List<String> assignedRoles = entry.getValue() == null ? List.of() : entry.getValue();
+            if (assignedRoles.isEmpty()) {
+                issues.add(warning("security.authorization.principal-roles." + principalId, "Principal has no assigned roles"));
+            }
+            for (int i = 0; i < assignedRoles.size(); i++) {
+                String roleId = assignedRoles.get(i);
+                if (!rolesById.containsKey(roleId)) {
+                    issues.add(error("security.authorization.principal-roles.%s[%d]".formatted(principalId, i), "Unknown role: " + roleId));
+                }
+            }
+        }
+    }
+
     private static void validatePool(String base, EventLensConfig.PoolConfig pool, List<ValidationError> issues) {
         if (pool == null) {
             return;
@@ -262,4 +518,5 @@ public final class ConfigValidator {
     private static ValidationError error(String path, String message) { return new ValidationError(path, message, ValidationError.Severity.ERROR); }
     private static ValidationError warning(String path, String message) { return new ValidationError(path, message, ValidationError.Severity.WARNING); }
     private static boolean isBlank(String s) { return s == null || s.isBlank(); }
+    private static String normalize(String s) { return s == null ? "" : s.trim().toLowerCase(); }
 }

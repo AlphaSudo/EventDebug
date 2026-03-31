@@ -51,6 +51,30 @@ ui:
 audit:
   enabled: true                # set to false to silence audit log entirely
 
+security:
+  production-mode: false       # set true for shared/prod deployments; blocks unsafe startup combinations
+  setup:
+    completed: true            # set false to force the setup wizard on next boot; omit or leave true for normal manual config
+  metadata:
+    enabled: false
+    jdbc-url: jdbc:sqlite:./data/eventlens-metadata.db
+  auth:
+    provider: disabled         # disabled | basic | oidc
+    session:
+      cookie-name: __Host-eventlens_session
+      idle-timeout-seconds: 1800
+      absolute-timeout-seconds: 28800
+      secure-cookie: true
+      same-site: Lax
+    api-keys:
+      enabled: false
+      header-name: X-API-Key
+      key-prefix: el
+
+# Compose note:
+# If metadata.enabled is true inside Docker, mount /app/data to a persistent volume
+# so sessions, audit records, and API keys survive container restarts.
+
 # ── 1.9 PII Masking ───────────────────────────────────────────────────────────
 # Scans event payloads in API responses for common PII patterns and replaces
 # matching text with the configured mask string.

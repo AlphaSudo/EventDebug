@@ -1,6 +1,7 @@
 package io.eventlens.api.routes;
 
 import io.eventlens.api.health.HealthService;
+import io.eventlens.core.metadata.MetadataDatabase;
 import io.eventlens.core.spi.EventStoreReader;
 import io.javalin.http.Context;
 
@@ -11,10 +12,12 @@ public class HealthRoutes {
 
     private final EventStoreReader reader;
     private final String version;
+    private final MetadataDatabase metadataDatabase;
 
-    public HealthRoutes(EventStoreReader reader, String version) {
+    public HealthRoutes(EventStoreReader reader, String version, MetadataDatabase metadataDatabase) {
         this.reader = reader;
         this.version = version;
+        this.metadataDatabase = metadataDatabase;
     }
 
     /** GET /api/v1/health/live */
@@ -24,7 +27,7 @@ public class HealthRoutes {
 
     /** GET /api/v1/health/ready */
     public void ready(Context ctx) {
-        var body = HealthService.ready(reader, version);
+        var body = HealthService.ready(reader, version, metadataDatabase);
         if ("DOWN".equals(body.get("status"))) {
             ctx.status(503);
         }

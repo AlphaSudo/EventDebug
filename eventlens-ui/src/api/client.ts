@@ -25,7 +25,107 @@ import {
 } from '../demo/demoData';
 import { isDemoMode } from '../demo/demoMode';
 
-const api = axios.create({ baseURL: '/api' });
+const api = axios.create({
+    baseURL: '/api',
+    withCredentials: true,
+});
+
+let csrfToken: string | null = null;
+
+api.interceptors.request.use(config => {
+    const method = (config.method ?? 'get').toUpperCase();
+    if (csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        config.headers = config.headers ?? {};
+        config.headers['X-CSRF-Token'] = csrfToken;
+    }
+    return config;
+});
+
+export interface AuthPrincipal {
+    userId: string;
+    displayName: string;
+    authMethod: string;
+    roles: string[];
+}
+
+export interface AuthSessionResponse {
+    authenticated: boolean;
+    principal?: AuthPrincipal;
+    returnHash?: string;
+    provider?: string;
+    basicLoginEnabled?: boolean;
+    csrfToken?: string;
+}
+
+export interface SetupStatusResponse {
+    setupRequired: boolean;
+    restartRequired: boolean;
+    configPath: string;
+}
+
+export interface SetupApplyRequest {
+    mode: 'basic' | 'oidc' | 'disabled';
+    username?: string;
+    password?: string;
+    issuer?: string;
+    clientId?: string;
+    clientSecret?: string;
+}
+
+export interface SetupApplyResponse {
+    saved: boolean;
+    restartRequired: boolean;
+    mode: string;
+    configPath: string;
+}
+
+export interface AuditEntry {
+    auditId: number;
+    action: string;
+    resourceType: string;
+    resourceId: string | null;
+    userId: string;
+    authMethod: string;
+    clientIp: string | null;
+    requestId: string | null;
+    userAgent: string | null;
+    details: Record<string, unknown>;
+    createdAt: string;
+}
+
+export interface AuditEntriesResponse {
+    entries: AuditEntry[];
+    limit: number;
+    action?: string | null;
+    userId?: string | null;
+}
+
+export interface ManagedApiKey {
+    apiKeyId: string;
+    keyPrefix: string;
+    description?: string | null;
+    principalUserId: string;
+    roles: string[];
+    createdAt: string;
+    expiresAt?: string | null;
+    revokedAt?: string | null;
+    lastUsedAt?: string | null;
+}
+
+export interface ManagedApiKeysResponse {
+    entries: ManagedApiKey[];
+}
+
+export interface CreateApiKeyRequest {
+    principalUserId: string;
+    roles: string[];
+    description?: string;
+    expiresAt?: string;
+}
+
+export interface CreateApiKeyResponse extends ManagedApiKey {
+    apiKey: string;
+}
 
 function delay(ms: number) {
     return new Promise<void>(resolve => {
@@ -39,6 +139,16 @@ function withOptionalSource(path: string, source?: string | null) {
     }
     const separator = path.includes('?') ? '&' : '?';
     return `${path}${separator}source=${encodeURIComponent(source)}`;
+}
+
+function encodeBasicCredentials(username: string, password: string) {
+    const credentials = `${username}:${password}`;
+    const bytes = new TextEncoder().encode(credentials);
+    let binary = '';
+    bytes.forEach(byte => {
+        binary += String.fromCharCode(byte);
+    });
+    return btoa(binary);
 }
 
 export type {
@@ -154,6 +264,78 @@ export const getHealth = async () => {
         return demoHealth();
     }
     return api.get('/health').then(r => r.data);
+};
+
+export const getAuthSession = async () => {
+    if (isDemoMode()) {
+        return {
+            authenticated: true,
+            principal: {
+                userId: 'demo-user',
+                displayName: 'Demo User',
+                authMethod: 'demo',
+                roles: ['demo'],
+            },
+        } satisfies AuthSessionResponse;
+    }
+    return api.get<AuthSessionResponse>('/v1/auth/session').then(r => r.data);
+};
+
+export const getSetupStatus = async () => {
+    if (isDemoMode()) {
+        return {
+            setupRequired: false,
+            restartRequired: false,
+            configPath: 'eventlens.yaml',
+        } satisfies SetupStatusResponse;
+    }
+    return api.get<SetupStatusResponse>('/v1/setup/status').then(r => r.data);
+};
+
+export const applySetup = async (payload: SetupApplyRequest) => {
+    return api.post<SetupApplyResponse>('/v1/setup/apply', payload).then(r => r.data);
+};
+
+export const getAuditEntries = async (limit = 25) => {
+    return api.get<AuditEntriesResponse>(`/v1/audit?limit=${limit}`).then(r => r.data);
+};
+
+export const getManagedApiKeys = async () => {
+    return api.get<ManagedApiKeysResponse>('/v1/admin/api-keys').then(r => r.data);
+};
+
+export const createManagedApiKey = async (payload: CreateApiKeyRequest) => {
+    return api.post<CreateApiKeyResponse>('/v1/admin/api-keys', payload).then(r => r.data);
+};
+
+export const revokeManagedApiKey = async (apiKeyId: string) => {
+    return api.post<{ apiKeyId: string; revoked: boolean }>(`/v1/admin/api-keys/${encodeURIComponent(apiKeyId)}/revoke`).then(r => r.data);
+};
+
+export const loginWithBasicSession = async (username: string, password: string, returnHash: string) => {
+    return api.post<AuthSessionResponse>(
+        '/v1/auth/login/basic',
+        { returnHash },
+        {
+            headers: {
+                Authorization: `Basic ${encodeBasicCredentials(username, password)}`,
+            },
+        }
+    ).then(r => r.data);
+};
+
+export const logoutSession = async () => {
+    if (isDemoMode()) {
+        return { authenticated: false } satisfies AuthSessionResponse;
+    }
+    return api.post<AuthSessionResponse>('/v1/auth/logout').then(r => r.data);
+};
+
+export const buildOidcLoginUrl = (returnHash: string) =>
+    `/api/v1/auth/login/oidc?returnHash=${encodeURIComponent(returnHash)}`;
+
+export const setCsrfToken = (value: string | null) => {
+    csrfToken = value;
 };
 
 export const getDatasources = async () => {

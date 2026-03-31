@@ -18,6 +18,7 @@ public class EventLensConfig {
     private AnomalyConfig anomaly = new AnomalyConfig();
     private UiConfig ui = new UiConfig();
     private AuditConfig audit = new AuditConfig();
+    private SecurityFeaturesConfig security = new SecurityFeaturesConfig();
     private DataProtectionConfig dataProtection = new DataProtectionConfig();
     private ExportConfig export = new ExportConfig();
     private PluginsConfig plugins = new PluginsConfig();
@@ -50,6 +51,9 @@ public class EventLensConfig {
 
     public AuditConfig getAudit() { return audit; }
     public void setAudit(AuditConfig audit) { this.audit = audit; }
+
+    public SecurityFeaturesConfig getSecurity() { return security; }
+    public void setSecurity(SecurityFeaturesConfig security) { this.security = security; }
 
     public DataProtectionConfig getDataProtection() { return dataProtection; }
     public void setDataProtection(DataProtectionConfig dataProtection) { this.dataProtection = dataProtection; }
@@ -121,6 +125,165 @@ public class EventLensConfig {
         private RateLimitConfig rateLimit = new RateLimitConfig();
         public RateLimitConfig getRateLimit() { return rateLimit; }
         public void setRateLimit(RateLimitConfig rateLimit) { this.rateLimit = rateLimit; }
+    }
+
+    public static class SecurityFeaturesConfig {
+        private boolean productionMode = false;
+        private SetupConfig setup = new SetupConfig();
+        private MetadataConfig metadata = new MetadataConfig();
+        private AuthProviderConfig auth = new AuthProviderConfig();
+        private AuthorizationConfig authorization = new AuthorizationConfig();
+
+        public boolean isProductionMode() { return productionMode; }
+        public void setProductionMode(boolean productionMode) { this.productionMode = productionMode; }
+        public SetupConfig getSetup() { return setup; }
+        public void setSetup(SetupConfig setup) { this.setup = setup; }
+        public MetadataConfig getMetadata() { return metadata; }
+        public void setMetadata(MetadataConfig metadata) { this.metadata = metadata; }
+        public AuthProviderConfig getAuth() { return auth; }
+        public void setAuth(AuthProviderConfig auth) { this.auth = auth; }
+        public AuthorizationConfig getAuthorization() { return authorization; }
+        public void setAuthorization(AuthorizationConfig authorization) { this.authorization = authorization; }
+    }
+
+    public static class SetupConfig {
+        private Boolean completed;
+
+        public Boolean getCompleted() { return completed; }
+        public boolean isCompleted() { return Boolean.TRUE.equals(completed); }
+        public void setCompleted(Boolean completed) { this.completed = completed; }
+    }
+
+    public static class AuthProviderConfig {
+        private String provider = "disabled";
+        private SessionConfig session = new SessionConfig();
+        private OidcConfig oidc = new OidcConfig();
+        private ApiKeysConfig apiKeys = new ApiKeysConfig();
+
+        public String getProvider() { return provider; }
+        public void setProvider(String provider) { this.provider = provider; }
+        public SessionConfig getSession() { return session; }
+        public void setSession(SessionConfig session) { this.session = session; }
+        public OidcConfig getOidc() { return oidc; }
+        public void setOidc(OidcConfig oidc) { this.oidc = oidc; }
+        public ApiKeysConfig getApiKeys() { return apiKeys; }
+        public void setApiKeys(ApiKeysConfig apiKeys) { this.apiKeys = apiKeys; }
+    }
+
+    public static class SessionConfig {
+        private String cookieName = "__Host-eventlens_session";
+        private int idleTimeoutSeconds = 1_800;
+        private int absoluteTimeoutSeconds = 28_800;
+        private boolean secureCookie = true;
+        private String sameSite = "Lax";
+
+        public String getCookieName() { return cookieName; }
+        public void setCookieName(String cookieName) { this.cookieName = cookieName; }
+        public int getIdleTimeoutSeconds() { return idleTimeoutSeconds; }
+        public void setIdleTimeoutSeconds(int idleTimeoutSeconds) { this.idleTimeoutSeconds = idleTimeoutSeconds; }
+        public int getAbsoluteTimeoutSeconds() { return absoluteTimeoutSeconds; }
+        public void setAbsoluteTimeoutSeconds(int absoluteTimeoutSeconds) { this.absoluteTimeoutSeconds = absoluteTimeoutSeconds; }
+        public boolean isSecureCookie() { return secureCookie; }
+        public void setSecureCookie(boolean secureCookie) { this.secureCookie = secureCookie; }
+        public String getSameSite() { return sameSite; }
+        public void setSameSite(String sameSite) { this.sameSite = sameSite; }
+    }
+
+    public static class OidcConfig {
+        private String issuer;
+        private String clientId;
+        private String clientSecret;
+        private String redirectPath = "/api/v1/auth/callback";
+        private String postLogoutRedirectPath = "/";
+        private List<String> scopes = List.of("openid", "profile", "email");
+
+        public String getIssuer() { return issuer; }
+        public void setIssuer(String issuer) { this.issuer = issuer; }
+        public String getClientId() { return clientId; }
+        public void setClientId(String clientId) { this.clientId = clientId; }
+        public String getClientSecret() { return clientSecret; }
+        public void setClientSecret(String clientSecret) { this.clientSecret = clientSecret; }
+        public String getRedirectPath() { return redirectPath; }
+        public void setRedirectPath(String redirectPath) { this.redirectPath = redirectPath; }
+        public String getPostLogoutRedirectPath() { return postLogoutRedirectPath; }
+        public void setPostLogoutRedirectPath(String postLogoutRedirectPath) { this.postLogoutRedirectPath = postLogoutRedirectPath; }
+        public List<String> getScopes() { return scopes; }
+        public void setScopes(List<String> scopes) { this.scopes = scopes == null ? List.of() : scopes; }
+    }
+
+    public static class ApiKeysConfig {
+        private boolean enabled = false;
+        private String headerName = "X-API-Key";
+        private String keyPrefix = "el";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getHeaderName() { return headerName; }
+        public void setHeaderName(String headerName) { this.headerName = headerName; }
+        public String getKeyPrefix() { return keyPrefix; }
+        public void setKeyPrefix(String keyPrefix) { this.keyPrefix = keyPrefix; }
+    }
+
+    public static class MetadataConfig {
+        private boolean enabled = false;
+        private String jdbcUrl = "jdbc:sqlite:./data/eventlens-metadata.db";
+        private PoolConfig pool = defaultPool();
+        private boolean walEnabled = true;
+        private int busyTimeoutMs = 5_000;
+        private boolean foreignKeysEnabled = true;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getJdbcUrl() { return jdbcUrl; }
+        public void setJdbcUrl(String jdbcUrl) { this.jdbcUrl = jdbcUrl; }
+        public PoolConfig getPool() { return pool; }
+        public void setPool(PoolConfig pool) { this.pool = pool; }
+        public boolean isWalEnabled() { return walEnabled; }
+        public void setWalEnabled(boolean walEnabled) { this.walEnabled = walEnabled; }
+        public int getBusyTimeoutMs() { return busyTimeoutMs; }
+        public void setBusyTimeoutMs(int busyTimeoutMs) { this.busyTimeoutMs = busyTimeoutMs; }
+        public boolean isForeignKeysEnabled() { return foreignKeysEnabled; }
+        public void setForeignKeysEnabled(boolean foreignKeysEnabled) { this.foreignKeysEnabled = foreignKeysEnabled; }
+
+        private static PoolConfig defaultPool() {
+            PoolConfig pool = new PoolConfig();
+            pool.setMaximumPoolSize(4);
+            pool.setMinimumIdle(1);
+            pool.setLeakDetectionThresholdMs(0);
+            return pool;
+        }
+    }
+
+    public static class AuthorizationConfig {
+        private boolean enabled = false;
+        private List<String> defaultRoles = List.of();
+        private Map<String, List<String>> principalRoles = Map.of();
+        private List<RoleConfig> roles = List.of();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public List<String> getDefaultRoles() { return defaultRoles; }
+        public void setDefaultRoles(List<String> defaultRoles) { this.defaultRoles = defaultRoles == null ? List.of() : defaultRoles; }
+        public Map<String, List<String>> getPrincipalRoles() { return principalRoles; }
+        public void setPrincipalRoles(Map<String, List<String>> principalRoles) { this.principalRoles = principalRoles == null ? Map.of() : principalRoles; }
+        public List<RoleConfig> getRoles() { return roles; }
+        public void setRoles(List<RoleConfig> roles) { this.roles = roles == null ? List.of() : roles; }
+    }
+
+    public static class RoleConfig {
+        private String id;
+        private List<String> permissions = List.of();
+        private List<String> allowedSources = List.of();
+        private List<String> allowedAggregateTypes = List.of();
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public List<String> getPermissions() { return permissions; }
+        public void setPermissions(List<String> permissions) { this.permissions = permissions == null ? List.of() : permissions; }
+        public List<String> getAllowedSources() { return allowedSources; }
+        public void setAllowedSources(List<String> allowedSources) { this.allowedSources = allowedSources == null ? List.of() : allowedSources; }
+        public List<String> getAllowedAggregateTypes() { return allowedAggregateTypes; }
+        public void setAllowedAggregateTypes(List<String> allowedAggregateTypes) { this.allowedAggregateTypes = allowedAggregateTypes == null ? List.of() : allowedAggregateTypes; }
     }
 
     public static class RateLimitConfig {
@@ -402,4 +565,3 @@ public class EventLensConfig {
         public void setMask(String mask) { this.mask = mask; }
     }
 }
-

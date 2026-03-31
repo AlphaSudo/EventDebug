@@ -24,6 +24,8 @@ tasks.shadowJar {
     archiveClassifier.set("")
     archiveVersion.set("")
     mergeServiceFiles()
+    // Ensure all JDBC driver entries survive the service-file merge (SQLite was dropped)
+    append("META-INF/services/java.sql.Driver")
 
     manifest {
         attributes(

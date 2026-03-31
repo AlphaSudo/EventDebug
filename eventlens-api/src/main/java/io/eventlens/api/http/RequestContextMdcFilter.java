@@ -15,12 +15,9 @@ public final class RequestContextMdcFilter implements Handler {
         String requestId = ctx.attribute("requestId");
         if (requestId != null) MDC.put("requestId", requestId);
 
-        String userId = ctx.attribute("auditUserId");
-        MDC.put("userId", userId != null ? userId : "anonymous");
+        MDC.put("userId", SecurityContext.principal(ctx).userId());
 
-        String clientIp = ctx.header("X-Real-IP");
-        if (clientIp == null || clientIp.isBlank()) clientIp = ctx.ip();
-        MDC.put("clientIp", clientIp);
+        MDC.put("clientIp", SecurityContext.clientIp(ctx));
 
         MDC.put("method", ctx.method().name());
         MDC.put("path", ctx.path());
@@ -30,4 +27,3 @@ public final class RequestContextMdcFilter implements Handler {
         MDC.clear();
     }
 }
-

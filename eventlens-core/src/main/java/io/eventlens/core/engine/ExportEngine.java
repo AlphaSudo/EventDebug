@@ -38,10 +38,14 @@ public class ExportEngine {
     public String export(String aggregateId, Format format) {
         log.info("Exporting aggregate '{}' as {}", aggregateId, format);
         List<StoredEvent> events = reader.getEvents(aggregateId);
+        return export(aggregateId, events, null, format);
+    }
+
+    public String export(String aggregateId, List<StoredEvent> events, List<io.eventlens.core.model.StateTransition> transitions, Format format) {
         return switch (format) {
             case JSON -> exportJson(aggregateId, events);
             case JUNIT_FIXTURE -> exportJunitFixture(aggregateId, events);
-            case MARKDOWN -> exportMarkdown(aggregateId, events);
+            case MARKDOWN -> exportMarkdown(aggregateId, transitions != null ? transitions : replayEngine.replayFull(aggregateId));
             case CSV -> exportCsv(events);
         };
     }
@@ -80,8 +84,7 @@ public class ExportEngine {
         return sb.toString();
     }
 
-    private String exportMarkdown(String aggregateId, List<StoredEvent> events) {
-        var transitions = replayEngine.replayFull(aggregateId);
+    private String exportMarkdown(String aggregateId, List<io.eventlens.core.model.StateTransition> transitions) {
         StringBuilder sb = new StringBuilder();
         sb.append("# Event History: ").append(aggregateId).append("\n\n");
         sb.append("| # | Event Type | Timestamp | Changes |\n");

@@ -39,13 +39,13 @@ RUN --mount=type=cache,target=/root/.gradle \
     && chmod +x gradlew \
     && ./gradlew :eventlens-app:shadowJar -x test --no-daemon
 
-## 2) Runtime stage – slim multi-arch JRE image (7.1)
-FROM docker.io/library/eclipse-temurin:21-jre-alpine AS base
+## 2) Runtime stage – glibc-based JRE image for native-library compatibility
+FROM docker.io/library/eclipse-temurin:21-jre-jammy AS base
 
 ARG TARGETARCH
 
-RUN addgroup -g 1000 eventlens && \
-    adduser -u 1000 -G eventlens -s /bin/sh -D eventlens
+RUN groupadd --gid 1000 eventlens && \
+    useradd --uid 1000 --gid eventlens --shell /bin/bash --create-home eventlens
 
 WORKDIR /app
 
@@ -56,7 +56,9 @@ COPY --from=build --chown=eventlens:eventlens /workspace/eventlens-app/build/lib
 COPY --from=build --chown=eventlens:eventlens /workspace/eventlens.yaml /app/eventlens.yaml
 
 # Health check dependency
-RUN apk add --no-cache curl
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
 
 USER eventlens
 
@@ -73,4 +75,3 @@ ENTRYPOINT ["java", \
   "-XX:MaxRAMPercentage=75.0", \
   "-Djava.security.egd=file:/dev/urandom", \
   "-jar", "/app/eventlens.jar"]
-

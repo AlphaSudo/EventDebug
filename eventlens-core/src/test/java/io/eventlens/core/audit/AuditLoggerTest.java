@@ -1,8 +1,13 @@
 package io.eventlens.core.audit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.eventlens.core.EventLensConfig;
+import io.eventlens.core.metadata.AuditLogRecord;
+import io.eventlens.core.metadata.MetadataDatabase;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -10,6 +15,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 
 class AuditLoggerTest {
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void log_enabled_doesNotThrow() {
@@ -80,5 +88,31 @@ class AuditLoggerTest {
                 AuditEvent.ACTION_VIEW_LIVE_STREAM
         );
         assertThat(constants).allSatisfy(c -> assertThat(c).isNotBlank());
+    }
+
+    @Test
+    void log_persistsToMetadataRepositoryWhenConfigured() {
+        EventLensConfig.MetadataConfig config = new EventLensConfig.MetadataConfig();
+        config.setEnabled(true);
+        config.setJdbcUrl("jdbc:sqlite:" + tempDir.resolve("audit.db"));
+
+        try (MetadataDatabase database = MetadataDatabase.open(config)) {
+            var logger = new AuditLogger(true, database.repositories().auditLogs());
+            var event = AuditEvent.builder()
+                    .action(AuditEvent.ACTION_EXPORT)
+                    .resourceType(AuditEvent.RT_EXPORT)
+                    .resourceId("agg-1")
+                    .userId("alice")
+                    .authMethod("basic")
+                    .requestId("req-1")
+                    .details(Map.of("format", "json"))
+                    .build();
+
+            logger.log(event);
+
+            assertThat(database.repositories().auditLogs().findRecent(10))
+                    .extracting(AuditLogRecord::requestId)
+                    .contains("req-1");
+        }
     }
 }

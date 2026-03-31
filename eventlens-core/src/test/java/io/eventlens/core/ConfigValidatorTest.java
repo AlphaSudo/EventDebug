@@ -51,4 +51,104 @@ class ConfigValidatorTest {
         var issues = ConfigValidator.validate(cfg);
         assertThat(issues.stream().filter(i -> i.severity() == ConfigValidator.ValidationError.Severity.ERROR && i.path().startsWith("datasources[0]")).toList()).isEmpty();
     }
+
+    @Test
+    void metadataStorageMustUseSqliteWhenEnabled() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().getMetadata().setEnabled(true);
+        cfg.getSecurity().getMetadata().setJdbcUrl("jdbc:postgresql://localhost/eventlens_metadata");
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.metadata.jdbc-url")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
+
+    @Test
+    void oidcProviderRequiresMetadataAndCoreSettings() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().getAuth().setProvider("oidc");
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.metadata.enabled")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.oidc.issuer")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.oidc.client-id")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.oidc.client-secret")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
+
+    @Test
+    void sessionCookieNoneRequiresSecureCookie() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().getAuth().getSession().setSameSite("None");
+        cfg.getSecurity().getAuth().getSession().setSecureCookie(false);
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.session.secure-cookie")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
+
+    @Test
+    void apiKeysRequireMetadataAndHeaderNameWhenEnabled() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().getAuth().getApiKeys().setEnabled(true);
+        cfg.getSecurity().getAuth().getApiKeys().setHeaderName(" ");
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.metadata.enabled")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.auth.api-keys.header-name")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
+
+    @Test
+    void authorizationRequiresKnownRolesAndPermissions() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().getAuthorization().setEnabled(true);
+
+        var role = new EventLensConfig.RoleConfig();
+        role.setId("viewer");
+        role.setPermissions(java.util.List.of("view_timeline", "not_real_permission"));
+        cfg.getSecurity().getAuthorization().setRoles(java.util.List.of(role));
+        cfg.getSecurity().getAuthorization().setDefaultRoles(java.util.List.of("missing-role"));
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.authorization.roles[0].permissions[1]")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.authorization.default-roles[0]")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
+
+    @Test
+    void productionModeRejectsWildcardOriginsAndMissingAuth() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().setProductionMode(true);
+        cfg.getServer().setAllowedOrigins(java.util.List.of("*"));
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("server.allowed-origins")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.production-mode")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
+
+    @Test
+    void productionModeRejectsInMemoryMetadataAndAuditDisabledSecurityFeatures() {
+        var cfg = new EventLensConfig();
+        cfg.getSecurity().setProductionMode(true);
+        cfg.getServer().setAllowedOrigins(java.util.List.of("https://eventlens.example"));
+        cfg.getSecurity().getAuth().setProvider("oidc");
+        cfg.getSecurity().getAuth().getSession().setSecureCookie(true);
+        cfg.getSecurity().getMetadata().setEnabled(true);
+        cfg.getSecurity().getMetadata().setJdbcUrl("jdbc:sqlite::memory:");
+        cfg.getAudit().setEnabled(false);
+
+        var issues = ConfigValidator.validate(cfg);
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("security.metadata.jdbc-url")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+        assertThat(issues.stream().anyMatch(i -> i.path().equals("audit.enabled")
+                && i.severity() == ConfigValidator.ValidationError.Severity.ERROR)).isTrue();
+    }
 }

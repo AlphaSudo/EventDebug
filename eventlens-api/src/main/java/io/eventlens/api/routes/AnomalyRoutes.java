@@ -1,11 +1,15 @@
 package io.eventlens.api.routes;
 
 import io.eventlens.api.source.SourceRegistry;
+import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.core.EventLensConfig;
 import io.eventlens.core.InputValidator;
 import io.eventlens.core.audit.AuditEvent;
 import io.eventlens.core.audit.AuditLogger;
 import io.eventlens.core.engine.AnomalyDetector;
+import io.eventlens.core.pii.SensitiveDataProtector;
+import io.eventlens.core.security.Permission;
 import io.javalin.http.Context;
 
 import java.util.Map;
@@ -24,14 +28,20 @@ public class AnomalyRoutes {
     private final EventLensConfig.AnomalyConfig anomalyConfig;
     private final AuditLogger auditLogger;
     private final Map<String, AnomalyDetector> detectors = new ConcurrentHashMap<>();
+    private final RouteAuthorizer routeAuthorizer;
+    private final SensitiveDataProtector sensitiveDataProtector;
 
     public AnomalyRoutes(
             SourceRegistry sourceRegistry,
             EventLensConfig.AnomalyConfig anomalyConfig,
-            AuditLogger auditLogger) {
+            AuditLogger auditLogger,
+            RouteAuthorizer routeAuthorizer,
+            SensitiveDataProtector sensitiveDataProtector) {
         this.sourceRegistry = sourceRegistry;
         this.anomalyConfig = anomalyConfig;
         this.auditLogger = auditLogger;
+        this.routeAuthorizer = routeAuthorizer;
+        this.sensitiveDataProtector = sensitiveDataProtector;
     }
 
     /** GET /api/aggregates/{id}/anomalies */
@@ -39,22 +49,20 @@ public class AnomalyRoutes {
         String id = InputValidator.validateAggregateId(ctx.pathParam("id"));
         var source = sourceRegistry.resolve(ctx.queryParam("source"));
         var result = detectorFor(source.id(), source).scan(id);
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_ANOMALIES, source.id(), null)) {
+            return;
+        }
 
-        auditLogger.log(AuditEvent.builder()
+        auditLogger.log(SecurityContext.audit(ctx)
                 .action(AuditEvent.ACTION_VIEW_ANOMALIES)
                 .resourceType(AuditEvent.RT_ANOMALY)
                 .resourceId(id)
-                .userId(userId(ctx))
-                .authMethod(authMethod(ctx))
-                .clientIp(clientIp(ctx))
-                .requestId(requestId(ctx))
-                .userAgent(ctx.userAgent())
                 .details(Map.of(
                         "anomalyCount", result.size(),
                         "source", source.id()))
                 .build());
 
-        ctx.json(result);
+        ctx.json(sensitiveDataProtector.maskAnomalies(result));
     }
 
     /** GET /api/anomalies/recent?limit=100 */
@@ -63,53 +71,26 @@ public class AnomalyRoutes {
                 InputValidator.validateLimit(ctx.queryParam("limit"), 100, MAX_SCAN_LIMIT),
                 MAX_SCAN_LIMIT);
         var source = sourceRegistry.resolve(ctx.queryParam("source"));
+        if (!routeAuthorizer.require(ctx, Permission.VIEW_ANOMALIES, source.id(), null)) {
+            return;
+        }
         var result = detectorFor(source.id(), source).scanRecent(limit);
 
-        auditLogger.log(AuditEvent.builder()
+        auditLogger.log(SecurityContext.audit(ctx)
                 .action(AuditEvent.ACTION_VIEW_ANOMALIES)
                 .resourceType(AuditEvent.RT_ANOMALY)
-                .userId(userId(ctx))
-                .authMethod(authMethod(ctx))
-                .clientIp(clientIp(ctx))
-                .requestId(requestId(ctx))
-                .userAgent(ctx.userAgent())
                 .details(Map.of(
                         "limit", limit,
                         "anomalyCount", result.size(),
                         "source", source.id()))
                 .build());
 
-        ctx.json(result);
+        ctx.json(sensitiveDataProtector.maskAnomalies(result));
     }
 
     private AnomalyDetector detectorFor(String sourceId, SourceRegistry.ResolvedSource source) {
         return detectors.computeIfAbsent(
                 sourceId,
                 ignored -> new AnomalyDetector(source.reader(), source.replayEngine(), anomalyConfig));
-    }
-
-    private static String userId(Context ctx) {
-        String v = ctx.attribute("auditUserId");
-        return v != null ? v : "anonymous";
-    }
-
-    private static String authMethod(Context ctx) {
-        String v = ctx.attribute("auditAuthMethod");
-        return v != null ? v : "anonymous";
-    }
-
-    private static String clientIp(Context ctx) {
-        String xff = ctx.header("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int c = xff.indexOf(',');
-            return (c >= 0 ? xff.substring(0, c) : xff).trim();
-        }
-        String xri = ctx.header("X-Real-IP");
-        return xri != null && !xri.isBlank() ? xri.trim() : ctx.ip();
-    }
-
-    private static String requestId(Context ctx) {
-        String v = ctx.attribute("requestId");
-        return v != null ? v : "unknown";
     }
 }

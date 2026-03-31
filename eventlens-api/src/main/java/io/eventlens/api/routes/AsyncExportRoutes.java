@@ -2,7 +2,11 @@ package io.eventlens.api.routes;
 
 import io.eventlens.api.export.ExportJob;
 import io.eventlens.api.export.ExportService;
+import io.eventlens.api.http.SecurityContext;
+import io.eventlens.api.metrics.EventLensMetrics;
+import io.eventlens.api.security.RouteAuthorizer;
 import io.eventlens.core.InputValidator;
+import io.eventlens.core.security.Permission;
 import io.javalin.http.Context;
 
 import java.nio.file.Files;
@@ -12,9 +16,11 @@ import java.util.Map;
 public final class AsyncExportRoutes {
 
     private final ExportService exportService;
+    private final RouteAuthorizer routeAuthorizer;
 
-    public AsyncExportRoutes(ExportService exportService) {
+    public AsyncExportRoutes(ExportService exportService, RouteAuthorizer routeAuthorizer) {
         this.exportService = exportService;
+        this.routeAuthorizer = routeAuthorizer;
     }
 
     public record ExportRequest(String aggregateId, String format, Integer limit) {
@@ -30,18 +36,22 @@ public final class AsyncExportRoutes {
 
         String aggregateId = InputValidator.validateAggregateId(req.aggregateId);
         int limit = req.limit != null ? Math.max(1, req.limit) : 50_000;
+        if (!routeAuthorizer.require(ctx, Permission.START_EXPORT, null, null)) {
+            return;
+        }
 
         ExportJob job = exportService.startAggregateExport(
                 aggregateId,
                 req.format,
                 limit,
                 Map.of(
-                        "userId", userId(ctx),
-                        "authMethod", authMethod(ctx),
-                        "clientIp", clientIp(ctx),
-                        "requestId", requestId(ctx),
+                        "userId", SecurityContext.principal(ctx).userId(),
+                        "authMethod", SecurityContext.principal(ctx).authMethod(),
+                        "clientIp", SecurityContext.clientIp(ctx),
+                        "requestId", SecurityContext.requestId(ctx),
                         "userAgent", ctx.userAgent() != null ? ctx.userAgent() : "unknown"
                 ));
+        EventLensMetrics.recordSensitiveAction("export_async", "started");
 
         ctx.status(202).json(Map.of(
                 "exportId", job.exportId(),
@@ -52,6 +62,9 @@ public final class AsyncExportRoutes {
 
     /** GET /api/events/export/{exportId} */
     public void status(Context ctx) {
+        if (!routeAuthorizer.require(ctx, Permission.START_EXPORT, null, null)) {
+            return;
+        }
         String exportId = ctx.pathParam("exportId");
         ExportJob job = exportService.get(exportId);
         if (job == null) {
@@ -63,8 +76,11 @@ public final class AsyncExportRoutes {
             long fileSize = 0L;
             try {
                 var f = job.file();
-                if (f != null && Files.exists(f)) fileSize = Files.size(f);
-            } catch (Exception ignored) {}
+                if (f != null && Files.exists(f)) {
+                    fileSize = Files.size(f);
+                }
+            } catch (Exception ignored) {
+            }
 
             ctx.json(Map.of(
                     "exportId", job.exportId(),
@@ -99,6 +115,9 @@ public final class AsyncExportRoutes {
 
     /** GET /api/events/export/{exportId}/download */
     public void download(Context ctx) {
+        if (!routeAuthorizer.require(ctx, Permission.START_EXPORT, null, null)) {
+            return;
+        }
         String exportId = ctx.pathParam("exportId");
         var file = exportService.getDownloadFile(exportId);
         if (file == null) {
@@ -114,36 +133,10 @@ public final class AsyncExportRoutes {
         ctx.contentType(contentType);
         try {
             ctx.result(Files.newInputStream(file));
+            EventLensMetrics.recordSensitiveAction("export_async_download", "success");
         } catch (Exception e) {
+            EventLensMetrics.recordSensitiveAction("export_async_download", "failure");
             ctx.status(500).json(Map.of("error", "download_failed", "message", e.getMessage()));
         }
     }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    private static String userId(Context ctx) {
-        String v = ctx.attribute("auditUserId");
-        return v != null ? v : "anonymous";
-    }
-
-    private static String authMethod(Context ctx) {
-        String v = ctx.attribute("auditAuthMethod");
-        return v != null ? v : "anonymous";
-    }
-
-    private static String clientIp(Context ctx) {
-        String xff = ctx.header("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int c = xff.indexOf(',');
-            return (c >= 0 ? xff.substring(0, c) : xff).trim();
-        }
-        String xri = ctx.header("X-Real-IP");
-        return xri != null && !xri.isBlank() ? xri.trim() : ctx.ip();
-    }
-
-    private static String requestId(Context ctx) {
-        String v = ctx.attribute("requestId");
-        return v != null ? v : "unknown";
-    }
 }
-
