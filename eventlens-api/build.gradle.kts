@@ -9,8 +9,8 @@ dependencies {
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.21.2")
     testImplementation(project(":eventlens-source-postgres"))
     testImplementation(project(":eventlens-source-mysql"))
-    testImplementation("org.testcontainers:junit-jupiter:1.20.1")
-    testImplementation("org.testcontainers:postgresql:1.20.1")
-    testImplementation("org.testcontainers:mysql:1.20.1")
+    testImplementation("org.testcontainers:junit-jupiter:1.21.4")
+    testImplementation("org.testcontainers:postgresql:1.21.4")
+    testImplementation("org.testcontainers:mysql:1.21.4")
 }
 
