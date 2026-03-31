@@ -11,6 +11,7 @@ import StatisticsPanel from './components/StatisticsPanel';
 import CommandPalette from './components/CommandPalette';
 import KeyboardManager from './components/KeyboardManager';
 import AdminConsole from './components/AdminConsole';
+import SetupWizard from './components/SetupWizard';
 import {
     buildOidcLoginUrl,
     getAuthSession,
@@ -18,10 +19,12 @@ import {
     getHealth,
     getPlugins,
     getRecentEvents,
+    getSetupStatus,
     getTimeline,
     loginWithBasicSession,
     logoutSession,
     setCsrfToken,
+    type SetupApplyResponse,
 } from './api/client';
 import { isDemoMode } from './demo/demoMode';
 import { useReplay } from './hooks/useReplay';
@@ -147,6 +150,7 @@ export default function App() {
     const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
     const [isSubmittingLogout, setIsSubmittingLogout] = useState(false);
     const [oidcError, setOidcError] = useState<string | null>(null);
+    const [setupApplied, setSetupApplied] = useState<SetupApplyResponse | null>(null);
 
     useEffect(() => {
         const syncHash = () => setCurrentHash(window.location.hash || '');
@@ -206,14 +210,26 @@ export default function App() {
         window.history.replaceState(null, '', newUrl);
     }, [activePanel, activeTab, compareSequence, selectedAggregate, selectedSequence, selectedSource]);
 
+    const setupQuery = useQuery({
+        queryKey: ['setup-status'],
+        queryFn: getSetupStatus,
+        retry: false,
+        refetchOnWindowFocus: false,
+    });
     const authQuery = useQuery({
         queryKey: ['auth-session'],
         queryFn: getAuthSession,
         retry: false,
         refetchOnWindowFocus: false,
+        enabled: isDemoMode() || (setupQuery.isSuccess && !setupQuery.data?.setupRequired && !setupQuery.data?.restartRequired),
     });
     const isAuthenticated = isDemoMode() || authQuery.data?.authenticated === true;
-    const authReady = isDemoMode() || authQuery.isSuccess || authQuery.isError;
+    const setupReady = isDemoMode() || setupQuery.isSuccess || setupQuery.isError;
+    const authReady = isDemoMode()
+        || authQuery.isSuccess
+        || authQuery.isError
+        || !!setupQuery.data?.setupRequired
+        || !!setupQuery.data?.restartRequired;
 
     useEffect(() => {
         if (isDemoMode()) {
@@ -305,6 +321,52 @@ export default function App() {
             setIsSubmittingLogout(false);
         }
     };
+
+    if (!setupReady) {
+        return (
+            <div className="app auth-shell">
+                <main className="auth-screen" role="main" aria-label="Setup status">
+                    <section className="auth-card">
+                        <div className="auth-eyebrow">EventLens Setup</div>
+                        <h1 className="auth-title">Checking instance state</h1>
+                        <p className="auth-copy">
+                            We are checking whether this EventLens instance still needs first-run security setup.
+                        </p>
+                    </section>
+                </main>
+            </div>
+        );
+    }
+
+    if (setupQuery.data?.setupRequired && !setupApplied) {
+        return <SetupWizard status={setupQuery.data} onApplied={setSetupApplied} />;
+    }
+
+    if (setupApplied || setupQuery.data?.restartRequired) {
+        const setupResult = setupApplied ?? {
+            saved: true,
+            restartRequired: true,
+            mode: 'saved',
+            configPath: setupQuery.data?.configPath ?? 'eventlens.yaml',
+        };
+        return (
+            <div className="app auth-shell">
+                <main className="auth-screen" role="main" aria-label="Restart required">
+                    <section className="auth-card">
+                        <div className="auth-eyebrow">EventLens Setup</div>
+                        <h1 className="auth-title">Restart required</h1>
+                        <p className="auth-copy">
+                            We saved the new security mode to <span className="setup-path">{setupResult.configPath}</span>.
+                            Restart EventLens once so the new auth pipeline comes up cleanly.
+                        </p>
+                        <div className="setup-warning">
+                            Saved mode: <strong>{setupResult.mode}</strong>. After restart, reload this page and continue with the normal sign-in flow.
+                        </div>
+                    </section>
+                </main>
+            </div>
+        );
+    }
 
     if (!authReady) {
         return (

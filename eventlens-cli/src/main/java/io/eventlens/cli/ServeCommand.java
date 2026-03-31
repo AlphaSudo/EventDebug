@@ -65,7 +65,9 @@ public class ServeCommand implements Runnable {
 
     @Override
     public void run() {
-        EventLensConfig config = configPath != null ? ConfigLoader.load(configPath) : ConfigLoader.load();
+        var loadedConfig = configPath != null ? ConfigLoader.loadResolved(configPath) : ConfigLoader.loadResolved();
+        EventLensConfig config = loadedConfig.config();
+        String effectiveConfigPath = loadedConfig.sourcePath() != null ? loadedConfig.sourcePath() : ConfigLoader.defaultConfigPath();
 
         if (port != null) config.getServer().setPort(port);
         if (dbUrl != null) config.getDatasource().setUrl(dbUrl);
@@ -115,7 +117,9 @@ public class ServeCommand implements Runnable {
                 exportEngine,
                 diffEngine,
                 datasourceStreamBindings(config),
-                metadataDatabase);
+                metadataDatabase,
+                effectiveConfigPath,
+                loadedConfig.fromFile());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {

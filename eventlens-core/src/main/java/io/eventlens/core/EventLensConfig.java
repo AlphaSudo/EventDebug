@@ -129,18 +129,29 @@ public class EventLensConfig {
 
     public static class SecurityFeaturesConfig {
         private boolean productionMode = false;
+        private SetupConfig setup = new SetupConfig();
         private MetadataConfig metadata = new MetadataConfig();
         private AuthProviderConfig auth = new AuthProviderConfig();
         private AuthorizationConfig authorization = new AuthorizationConfig();
 
         public boolean isProductionMode() { return productionMode; }
         public void setProductionMode(boolean productionMode) { this.productionMode = productionMode; }
+        public SetupConfig getSetup() { return setup; }
+        public void setSetup(SetupConfig setup) { this.setup = setup; }
         public MetadataConfig getMetadata() { return metadata; }
         public void setMetadata(MetadataConfig metadata) { this.metadata = metadata; }
         public AuthProviderConfig getAuth() { return auth; }
         public void setAuth(AuthProviderConfig auth) { this.auth = auth; }
         public AuthorizationConfig getAuthorization() { return authorization; }
         public void setAuthorization(AuthorizationConfig authorization) { this.authorization = authorization; }
+    }
+
+    public static class SetupConfig {
+        private Boolean completed;
+
+        public Boolean getCompleted() { return completed; }
+        public boolean isCompleted() { return Boolean.TRUE.equals(completed); }
+        public void setCompleted(Boolean completed) { this.completed = completed; }
     }
 
     public static class AuthProviderConfig {

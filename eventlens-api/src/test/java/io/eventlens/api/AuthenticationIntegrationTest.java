@@ -10,6 +10,7 @@ import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import io.eventlens.core.EventLensConfig;
+import io.eventlens.core.ConfigLoader;
 import io.eventlens.core.aggregator.ReducerRegistry;
 import io.eventlens.core.engine.AnomalyDetector;
 import io.eventlens.core.engine.BisectEngine;
@@ -77,7 +78,7 @@ class AuthenticationIntegrationTest {
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         assertThat(response.statusCode()).isEqualTo(401);
-        assertThat(response.headers().firstValue("WWW-Authenticate")).hasValue("Basic realm=\"EventLens\"");
+        assertThat(response.headers().firstValue("WWW-Authenticate")).isEmpty();
     }
 
     @Test
@@ -113,6 +114,100 @@ class AuthenticationIntegrationTest {
 
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.body()).contains("ORD-1001");
+    }
+
+    @Test
+    void firstRunSetupBlocksApisThenPersistsBasicBootstrap() throws Exception {
+        int port = freePort();
+        Path configPath = tempDir.resolve("first-run-eventlens.yaml");
+        server = startServer(port, false, null, cfg -> { }, configPath, false);
+
+        var client = HttpClient.newHttpClient();
+
+        var statusRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/setup/status".formatted(port)))
+                .GET()
+                .build();
+        HttpResponse<String> statusResponse = client.send(statusRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(statusResponse.statusCode()).isEqualTo(200);
+        assertThat(statusResponse.body()).contains("\"setupRequired\":true");
+
+        var blockedRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/aggregates/search?q=ord".formatted(port)))
+                .GET()
+                .build();
+        HttpResponse<String> blockedResponse = client.send(blockedRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(blockedResponse.statusCode()).isEqualTo(503);
+        assertThat(blockedResponse.body()).contains("setup_required");
+
+        var applyRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/setup/apply".formatted(port)))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("""
+                        {"mode":"basic","username":"setup-admin","password":"correct horse battery"}
+                        """))
+                .build();
+        HttpResponse<String> applyResponse = client.send(applyRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(applyResponse.statusCode()).isEqualTo(200);
+        assertThat(applyResponse.body()).contains("\"restartRequired\":true");
+        assertThat(configPath).exists();
+
+        server.stop();
+        server = null;
+
+        EventLensConfig loaded = ConfigLoader.load(configPath.toString());
+        loaded.getServer().setPort(port);
+
+        var replayEngine = new ReplayEngine(reader(), new ReducerRegistry());
+        var bisectEngine = new BisectEngine(replayEngine, reader());
+        var anomalyDetector = new AnomalyDetector(reader(), replayEngine, loaded.getAnomaly());
+        var exportEngine = new ExportEngine(reader(), replayEngine);
+        var diffEngine = new DiffEngine(replayEngine);
+        var metadataDatabase = MetadataDatabase.open(loaded.getSecurity().getMetadata());
+
+        server = new EventLensServer(
+                loaded,
+                reader(),
+                replayEngine,
+                new ReducerRegistry(),
+                new PluginManager(30),
+                "default",
+                bisectEngine,
+                anomalyDetector,
+                exportEngine,
+                diffEngine,
+                Map.of(),
+                metadataDatabase,
+                configPath.toString(),
+                true);
+        server.start();
+
+        var loginRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/auth/login/basic".formatted(port)))
+                .header("Authorization", basicAuth("setup-admin", "correct horse battery"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"returnHash\":\"#/timeline\"}"))
+                .build();
+        HttpResponse<String> loginResponse = client.send(loginRequest, HttpResponse.BodyHandlers.ofString());
+        assertThat(loginResponse.statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void explicitFalseSetupMarkerForcesWizardEvenWhenConfigFileExists() throws Exception {
+        int port = freePort();
+        Path configPath = tempDir.resolve("force-setup.yaml");
+        server = startServer(port, false, null, cfg -> cfg.getSecurity().getSetup().setCompleted(false), configPath, true);
+
+        var client = HttpClient.newHttpClient();
+        var statusRequest = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:%d/api/v1/setup/status".formatted(port)))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(statusRequest, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).contains("\"setupRequired\":true");
     }
 
     @Test
@@ -675,6 +770,16 @@ class AuthenticationIntegrationTest {
     }
 
     private EventLensServer startServer(int port, boolean authEnabled, String oidcIssuer, Consumer<EventLensConfig> configCustomizer) {
+        return startServer(port, authEnabled, oidcIssuer, configCustomizer, tempDir.resolve("eventlens-" + port + ".yaml"), true);
+    }
+
+    private EventLensServer startServer(
+            int port,
+            boolean authEnabled,
+            String oidcIssuer,
+            Consumer<EventLensConfig> configCustomizer,
+            Path configPath,
+            boolean configPresentAtStartup) {
         EventStoreReader reader = new EventStoreReader() {
             @Override
             public List<StoredEvent> getEvents(String aggregateId) {
@@ -778,9 +883,77 @@ class AuthenticationIntegrationTest {
                 exportEngine,
                 diffEngine,
                 java.util.Map.of(),
-                metadataDatabase);
+                metadataDatabase,
+                configPath.toString(),
+                configPresentAtStartup);
         eventLensServer.start();
         return eventLensServer;
+    }
+
+    private EventStoreReader reader() {
+        return new EventStoreReader() {
+            @Override
+            public List<StoredEvent> getEvents(String aggregateId) {
+                if (!"ORD-1001".equals(aggregateId)) {
+                    return List.of();
+                }
+                return List.of(
+                        new StoredEvent(
+                                "evt-1", "ORD-1001", "Order", 1, "ORDER_CREATED",
+                                "{\"email\":\"alice@example.com\",\"status\":\"created\"}",
+                                "{\"source\":\"default\"}",
+                                Instant.parse("2026-01-01T00:00:00Z"),
+                                1L
+                        ),
+                        new StoredEvent(
+                                "evt-2", "ORD-1001", "Order", 2, "ORDER_CONFIRMED",
+                                "{\"status\":\"confirmed\"}",
+                                "{\"source\":\"default\"}",
+                                Instant.parse("2026-01-01T00:01:00Z"),
+                                2L
+                        )
+                );
+            }
+
+            @Override
+            public List<StoredEvent> getEventsUpTo(String aggregateId, long maxSequence) {
+                return getEvents(aggregateId).stream()
+                        .filter(event -> event.sequenceNumber() <= maxSequence)
+                        .toList();
+            }
+
+            @Override
+            public List<String> findAggregateIds(String aggregateType, int limit, int offset) {
+                return List.of("ORD-1001");
+            }
+
+            @Override
+            public List<StoredEvent> getRecentEvents(int limit) {
+                return List.of(new StoredEvent(
+                        "evt-1", "ORD-1001", "Order", 1, "ORDER_CREATED",
+                        "{}", "{}", Instant.now(), 1L));
+            }
+
+            @Override
+            public List<StoredEvent> getEventsAfter(long globalPosition, int limit) {
+                return List.of();
+            }
+
+            @Override
+            public long countEvents(String aggregateId) {
+                return getEvents(aggregateId).size();
+            }
+
+            @Override
+            public List<String> getAggregateTypes() {
+                return List.of("Order");
+            }
+
+            @Override
+            public List<String> searchAggregates(String query, int limit) {
+                return List.of("ORD-1001");
+            }
+        };
     }
 
     private static String basicAuth(String username, String password) {

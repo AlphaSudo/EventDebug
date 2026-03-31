@@ -47,6 +47,16 @@ public final class MetadataDatabase implements AutoCloseable {
 
         ensureSqliteParentDirectory(config.getJdbcUrl());
 
+        // Explicitly load the SQLite driver — in fat JARs the
+        // META-INF/services/java.sql.Driver merge may lose entries.
+        try {
+            Class.forName("org.sqlite.JDBC");
+        } catch (ClassNotFoundException e) {
+            throw new ConfigurationException(
+                    "SQLite JDBC driver not found on classpath. "
+                            + "Add org.xerial:sqlite-jdbc to your dependencies.", e);
+        }
+
         HikariConfig hikari = new HikariConfig();
         hikari.setJdbcUrl(config.getJdbcUrl());
         hikari.setPoolName("eventlens-metadata");

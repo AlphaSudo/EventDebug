@@ -79,7 +79,7 @@ export default function AdminConsole() {
             principalUserId: principalUserId.trim(),
             roles: roles.split(',').map(role => role.trim()).filter(Boolean),
             description: description.trim() || undefined,
-            expiresAt: expiresAt.trim() || undefined,
+            expiresAt: expiresAt.trim() ? new Date(expiresAt).toISOString() : undefined,
         });
     };
 
@@ -171,8 +171,14 @@ export default function AdminConsole() {
                                     <input className="auth-input" value={description} onChange={event => setDescription(event.target.value)} />
                                 </label>
                                 <label className="admin-field">
-                                    <span className="auth-label">Expires At (ISO-8601)</span>
-                                    <input className="auth-input" value={expiresAt} onChange={event => setExpiresAt(event.target.value)} placeholder="2026-04-01T00:00:00Z" />
+                                    <span className="auth-label">Expires At (Local Time)</span>
+                                    <input 
+                                        type="datetime-local"
+                                        className="auth-input" 
+                                        value={expiresAt} 
+                                        onChange={event => setExpiresAt(event.target.value)} 
+                                        min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+                                    />
                                 </label>
                                 {createError && <SecurityStateCard title="Key creation failed" detail={createError.message} />}
                                 <button className="auth-submit" type="submit" disabled={createKeyMutation.isPending}>

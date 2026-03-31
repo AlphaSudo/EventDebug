@@ -57,6 +57,28 @@ export interface AuthSessionResponse {
     csrfToken?: string;
 }
 
+export interface SetupStatusResponse {
+    setupRequired: boolean;
+    restartRequired: boolean;
+    configPath: string;
+}
+
+export interface SetupApplyRequest {
+    mode: 'basic' | 'oidc' | 'disabled';
+    username?: string;
+    password?: string;
+    issuer?: string;
+    clientId?: string;
+    clientSecret?: string;
+}
+
+export interface SetupApplyResponse {
+    saved: boolean;
+    restartRequired: boolean;
+    mode: string;
+    configPath: string;
+}
+
 export interface AuditEntry {
     auditId: number;
     action: string;
@@ -257,6 +279,21 @@ export const getAuthSession = async () => {
         } satisfies AuthSessionResponse;
     }
     return api.get<AuthSessionResponse>('/v1/auth/session').then(r => r.data);
+};
+
+export const getSetupStatus = async () => {
+    if (isDemoMode()) {
+        return {
+            setupRequired: false,
+            restartRequired: false,
+            configPath: 'eventlens.yaml',
+        } satisfies SetupStatusResponse;
+    }
+    return api.get<SetupStatusResponse>('/v1/setup/status').then(r => r.data);
+};
+
+export const applySetup = async (payload: SetupApplyRequest) => {
+    return api.post<SetupApplyResponse>('/v1/setup/apply', payload).then(r => r.data);
 };
 
 export const getAuditEntries = async (limit = 25) => {

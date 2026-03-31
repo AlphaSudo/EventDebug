@@ -89,6 +89,8 @@ audit:
 
 security:
   production-mode: false
+  setup:
+    completed: true # set false to force the setup wizard on next boot; leave unset/true for normal manual config
   metadata:
     enabled: false
     jdbc-url: jdbc:sqlite:./data/eventlens-metadata.db
@@ -129,6 +131,10 @@ data-protection:
       - name: ssn
         regex: "\\d{3}-\\d{2}-\\d{4}"
         mask: "***-**-****"
+
+# Docker note:
+# When metadata storage is enabled in a container, mount /app/data to a persistent volume
+# so metadata-backed sessions, audit records, and API keys survive restarts.
 
 export:
   directory: ./exports

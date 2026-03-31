@@ -46,8 +46,7 @@ public final class ApiKeyService {
                 now,
                 expiresAt,
                 null,
-                null
-        );
+                null);
         repository.insert(record);
         return new IssuedApiKey(
                 apiKeyId,
@@ -57,8 +56,7 @@ public final class ApiKeyService {
                 principalUserId,
                 record.scopes(),
                 now,
-                expiresAt
-        );
+                expiresAt);
     }
 
     public Optional<ApiKeyRecord> authenticate(String rawApiKey) {
@@ -99,8 +97,7 @@ public final class ApiKeyService {
                 record.createdAt(),
                 record.expiresAt(),
                 record.revokedAt(),
-                lastUsedAt
-        ));
+                lastUsedAt));
     }
 
     public List<ApiKeyRecord> list() {

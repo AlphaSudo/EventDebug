@@ -53,6 +53,8 @@ audit:
 
 security:
   production-mode: false       # set true for shared/prod deployments; blocks unsafe startup combinations
+  setup:
+    completed: true            # set false to force the setup wizard on next boot; omit or leave true for normal manual config
   metadata:
     enabled: false
     jdbc-url: jdbc:sqlite:./data/eventlens-metadata.db
@@ -68,6 +70,10 @@ security:
       enabled: false
       header-name: X-API-Key
       key-prefix: el
+
+# Compose note:
+# If metadata.enabled is true inside Docker, mount /app/data to a persistent volume
+# so sessions, audit records, and API keys survive container restarts.
 
 # ── 1.9 PII Masking ───────────────────────────────────────────────────────────
 # Scans event payloads in API responses for common PII patterns and replaces

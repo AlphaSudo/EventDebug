@@ -210,6 +210,75 @@ body::after {
   box-shadow: none;
 }
 
+.setup-card {
+  width: min(760px, 100%);
+}
+
+.setup-path {
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+}
+
+.setup-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.setup-mode-card {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 14, 26, 0.9);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+
+.setup-mode-card strong {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.setup-mode-card span {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.setup-mode-card:hover,
+.setup-mode-card--active {
+  border-color: rgba(0, 240, 255, 0.28);
+  box-shadow: 0 0 24px rgba(0, 240, 255, 0.08);
+  transform: translateY(-1px);
+}
+
+.setup-mode-copy {
+  color: var(--text-secondary);
+  margin-bottom: 18px;
+}
+
+.setup-warning {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 170, 0, 0.24);
+  background: rgba(255, 170, 0, 0.08);
+  color: #ffd27a;
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .setup-mode-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .app-header {
   --header-pad-x: 24px;
   --header-pad-right: 48px; /* room for workspace chevron; mirrors visual weight of left brand */

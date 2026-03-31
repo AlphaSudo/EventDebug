@@ -22,7 +22,7 @@ import java.util.Optional;
 
 public final class OidcAuthRoutes {
 
-    private static final String STATE_COOKIE = "__Host-eventlens_oidc_state";
+    private static final String STATE_COOKIE = "eventlens_oidc_state";
 
     private final SessionService sessionService;
     private final EventLensConfig.SessionConfig sessionConfig;

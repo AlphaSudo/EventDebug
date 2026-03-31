@@ -13,6 +13,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * Discovers and loads the EventLens configuration file from well-known locations.
@@ -33,23 +35,31 @@ public class ConfigLoader {
             .findAndRegisterModules();
 
     public static EventLensConfig load() {
+        return loadResolved().config();
+    }
+
+    public static EventLensConfig load(String path) {
+        return loadResolved(path).config();
+    }
+
+    public static LoadedConfig loadResolved() {
         for (String path : CONFIG_PATHS) {
             File file = new File(path);
             if (file.exists()) {
                 try {
                     EventLensConfig config = readAndInterpolate(file);
                     log.info("Loaded config from: {}", file.getAbsolutePath());
-                    return config;
+                    return new LoadedConfig(config, file.getAbsolutePath(), true);
                 } catch (IOException e) {
                     throw new RuntimeException("Failed to parse config: " + path, e);
                 }
             }
         }
         log.warn("No config file found - using defaults. Searched: {}", String.join(", ", CONFIG_PATHS));
-        return new EventLensConfig();
+        return new LoadedConfig(new EventLensConfig(), null, false);
     }
 
-    public static EventLensConfig load(String path) {
+    public static LoadedConfig loadResolved(String path) {
         File file = new File(path);
         if (!file.exists()) {
             throw new RuntimeException("Config file not found: " + path);
@@ -57,9 +67,31 @@ public class ConfigLoader {
         try {
             EventLensConfig config = readAndInterpolate(file);
             log.info("Loaded config from: {}", file.getAbsolutePath());
-            return config;
+            return new LoadedConfig(config, file.getAbsolutePath(), true);
         } catch (IOException e) {
             throw new RuntimeException("Failed to parse config: " + path, e);
+        }
+    }
+
+    public static String defaultConfigPath() {
+        return new File(CONFIG_PATHS[0]).getAbsolutePath();
+    }
+
+    public static void save(String path, EventLensConfig config) {
+        try {
+            Path target = Path.of(path).toAbsolutePath();
+            Path parent = target.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            ObjectNode root = YAML_MAPPER.valueToTree(config);
+            root.remove("datasource");
+            root.remove("kafka");
+            root.set("datasources", YAML_MAPPER.valueToTree(config.getDatasourcesOrLegacy()));
+            root.set("streams", YAML_MAPPER.valueToTree(config.getStreamsOrLegacy()));
+            YAML_MAPPER.writeValue(target.toFile(), root);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to write config: " + path, e);
         }
     }
 
@@ -97,5 +129,8 @@ public class ConfigLoader {
                 }
             }
         }
+    }
+
+    public record LoadedConfig(EventLensConfig config, String sourcePath, boolean fromFile) {
     }
 }

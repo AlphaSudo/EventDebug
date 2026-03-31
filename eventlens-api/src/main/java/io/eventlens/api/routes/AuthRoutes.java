@@ -100,7 +100,6 @@ public final class AuthRoutes {
                     .build());
 
             ctx.status(401)
-                    .header("WWW-Authenticate", authResult.challengeHeader())
                     .json(Map.of("error", "Unauthorized"));
             return;
         }

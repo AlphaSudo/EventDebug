@@ -13,7 +13,8 @@ import java.util.Map;
 public final class JsonUtil {
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
-            .findAndRegisterModules();
+            .findAndRegisterModules()
+            .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private JsonUtil() {
     }
