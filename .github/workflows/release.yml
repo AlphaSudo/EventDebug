@@ -37,8 +37,11 @@ jobs:
     - name: Build the Fat JAR
       run: ./gradlew clean :eventlens-app:shadowJar --no-daemon
 
-    - name: Generate SBOM and dependency report
-      run: ./gradlew sbom dependencyScan --no-daemon
+    - name: Generate SBOM
+      run: ./gradlew sbom --no-daemon --no-configuration-cache
+
+    - name: Generate dependency report
+      run: ./gradlew dependencyScan --no-daemon --no-configuration-cache
 
     - name: Upload release security artifacts
       uses: actions/upload-artifact@v4
