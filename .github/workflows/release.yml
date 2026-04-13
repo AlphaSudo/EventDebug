@@ -22,7 +22,7 @@ jobs:
         distribution: 'temurin'
 
     - name: Set up Gradle
-      uses: gradle/actions/setup-gradle@v4
+      uses: gradle/actions/setup-gradle@v6
         
     - name: Set up Node.js 22
       uses: actions/setup-node@v6
@@ -41,7 +41,7 @@ jobs:
       run: ./gradlew sbom dependencyScan --no-daemon
 
     - name: Upload release security artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: release-security-artifacts
         path: |
@@ -49,7 +49,7 @@ jobs:
           build/libs/**
       
     - name: Create Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         files: |
           eventlens-app/build/libs/eventlens*.jar
