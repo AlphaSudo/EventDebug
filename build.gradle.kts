@@ -1,7 +1,7 @@
 plugins {
     java
-    id("org.owasp.dependencycheck") version "12.2.0"
-    id("org.cyclonedx.bom") version "3.2.0"
+    id("org.owasp.dependencycheck") version "12.2.1"
+    id("org.cyclonedx.bom") version "3.2.4"
 }
 
 // Shared versions
